@@ -1,0 +1,7 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+clickhouse-connect==0.8.14
+requests==2.32.3
+apscheduler==3.10.4
+jinja2==3.1.4
+python-multipart==0.0.17

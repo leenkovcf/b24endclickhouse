@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BI-коннектор Bitrix24 → ClickHouse</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══ Header ═══════════════════════════════════════════════════════════ -->
+<header class="app-header">
+  <h1>BI-коннектор Bitrix24 → ClickHouse</h1>
+  <span class="tariff-badge">локальный запуск</span>
+</header>
+
+<div class="app-body">
+
+<!-- ═══ Sidebar ══════════════════════════════════════════════════════════ -->
+<nav class="sidebar">
+  <div class="nav-item active" data-page="export">
+    <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+    Отправка данных
+  </div>
+  <div class="nav-item" data-page="settings">
+    <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.04.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+    Настройка подключения
+  </div>
+  <div class="nav-item" data-page="schedule">
+    <svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+    Расписание
+  </div>
+  <div class="nav-item" data-page="about">
+    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+    О приложении
+  </div>
+</nav>
+
+<!-- ═══ Main content ══════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- ── Export page ─────────────────────────────────────────────────── -->
+  <div class="page active" id="page-export">
+    <div class="page-title">Отправка данных в ClickHouse</div>
+
+    <div class="card">
+      <div id="export-conn-badge" class="conn-badge unk">
+        <div class="conn-dot"></div>
+        <span>Проверка подключения...</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Выгружаемая сущность</label>
+        <select id="exportEntity" class="form-control">
+          <option value="">— выберите сущность —</option>
+        </select>
+      </div>
+
+      <div id="dateSection">
+        <div class="form-group">
+          <label class="form-label">Тип даты</label>
+          <select id="exportDateField" class="form-control"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Период выгрузки</label>
+          <div class="date-row">
+            <input type="date" id="exportStartDate" class="form-control">
+            <input type="date" id="exportEndDate" class="form-control">
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters section -->
+      <div id="filtersSection" style="display:none">
+        <div class="filters-header">
+          <span class="filters-title">Фильтры</span>
+          <span id="filtersLoading" class="filters-loading" style="display:none">загрузка...</span>
+        </div>
+
+        <div class="filters-row">
+          <div id="funnelsGroup" style="display:none;flex:1;min-width:0">
+            <label class="form-label">
+              Воронки
+              <span class="sel-btns">
+                <a onclick="checkAll('funnelsList',true)">Все</a> /
+                <a onclick="checkAll('funnelsList',false)">Снять</a>
+              </span>
+            </label>
+            <div id="funnelsList" class="checkbox-group"></div>
+          </div>
+          <div id="stagesGroup" style="display:none;flex:1;min-width:0">
+            <label class="form-label">
+              Стадии
+              <span class="sel-btns">
+                <a onclick="checkAll('stagesList',true)">Все</a> /
+                <a onclick="checkAll('stagesList',false)">Снять</a>
+              </span>
+            </label>
+            <div id="stagesList" class="checkbox-group"></div>
+          </div>
+        </div>
+
+        <div id="fieldsGroup" style="display:none">
+          <label class="form-label">
+            Поля для выгрузки
+            <span class="sel-btns">
+              <a onclick="checkAll('fieldsList',true)">Все</a> /
+              <a onclick="checkAll('fieldsList',false)">Снять</a>
+            </span>
+          </label>
+          <div id="fieldsList" class="checkbox-grid"></div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btnExport" onclick="runExport()">
+        Запустить выгрузку
+      </button>
+
+      <!-- Live progress log -->
+      <div id="exportProgress" class="export-progress" style="display:none">
+        <div class="progress-header">
+          <span id="progressStatus">Выгрузка...</span>
+          <span id="progressTotal">0 строк</span>
+        </div>
+        <div id="progressLog" class="progress-log"></div>
+        <div class="progress-footer" id="progressFooter" style="display:none">
+          <span id="progressSummary"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Settings page ───────────────────────────────────────────────── -->
+  <div class="page" id="page-settings">
+    <div class="page-title">Настройка подключения к ClickHouse</div>
+
+    <div class="card">
+      <div class="section-title">Bitrix24</div>
+
+      <div class="form-group">
+        <label class="form-label">Адрес портала</label>
+        <input type="text" id="settPortal" class="form-control"
+               placeholder="example.bitrix24.ru">
+      </div>
+      <div class="form-group">
+        <label class="form-label">BI-ключ Битрикс24</label>
+        <input type="text" id="settBiKey" class="form-control"
+               placeholder="Ключ из раздела BI-аналитика">
+      </div>
+      <div class="form-group">
+        <label class="form-label">REST API Webhook <span style="font-weight:400;color:#aaa">(необязательно — для автозагрузки смарт-процессов)</span></label>
+        <input type="text" id="settWebhook" class="form-control"
+               placeholder="https://b24.tepleko.ru/rest/1/abc123xyz/">
+        <div style="font-size:12px;color:#999;margin-top:4px">
+          Профиль → Разработчикам → Входящий вебхук (права: CRM)
+        </div>
+      </div>
+
+      <div class="section-title">ClickHouse</div>
+
+      <div class="form-group">
+        <label class="form-label">Хост ClickHouse</label>
+        <input type="text" id="settHost" class="form-control"
+               placeholder="c-xxx.rw.mdb.yandexcloud.net">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Порт</label>
+        <input type="number" id="settPort" class="form-control" value="8443">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Имя базы данных</label>
+        <input type="text" id="settDb" class="form-control" value="default">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Имя пользователя</label>
+        <input type="text" id="settUser" class="form-control" value="admin">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Пароль</label>
+        <input type="password" id="settPass" class="form-control">
+      </div>
+
+      <div class="section-title">Смарт-процессы и кастомные сущности</div>
+      <p style="font-size:13px;color:#666;margin-bottom:12px;">
+        Смарт-процессы уникальны для каждого портала. Добавь их вручную: код таблицы вида
+        <code>crm_dynamic_items_105</code> и название. ID смарт-процесса можно найти в Bitrix24 →
+        CRM → Настройки → Смарт-процессы (в URL страницы).
+      </p>
+      <div id="customEntitiesList"></div>
+      <div class="btn-row" style="margin-bottom:4px">
+        <button class="btn btn-secondary" style="font-size:13px;padding:7px 14px"
+                onclick="addCustomEntityRow()">+ Добавить вручную</button>
+        <button class="btn btn-primary" style="font-size:13px;padding:7px 14px"
+                id="btnAutoLoad" onclick="autoLoadSmartProcesses()">⟳ Загрузить автоматически</button>
+      </div>
+      <div id="autoLoadResult" class="result-msg"></div>
+
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="saveSettings()">Сохранить настройки</button>
+        <button class="btn btn-secondary" onclick="testConnection()">Проверить подключение</button>
+      </div>
+      <div id="settResult" class="result-msg"></div>
+    </div>
+  </div>
+
+  <!-- ── Schedule page ───────────────────────────────────────────────── -->
+  <div class="page" id="page-schedule">
+    <div class="page-title">Настройка расписания выгрузки</div>
+
+    <div class="card">
+      <div id="sched-conn-badge" class="conn-badge unk">
+        <div class="conn-dot"></div>
+        <span>Проверка подключения...</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Периодичность выгрузки</label>
+        <select id="schedFreq" class="form-control">
+          <option value="hourly">Раз в час</option>
+          <option value="daily" selected>Раз в сутки</option>
+          <option value="weekly">Раз в неделю</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Выгружаемая сущность</label>
+        <select id="schedEntity" class="form-control">
+          <option value="">— выберите сущность —</option>
+        </select>
+      </div>
+
+      <div id="schedDateSection">
+        <div class="form-group">
+          <label class="form-label">Тип даты</label>
+          <select id="schedDateField" class="form-control"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Глубина выгрузки (дней назад)</label>
+          <input type="number" id="schedDaysBack" class="form-control" value="1" min="1" max="365">
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveSchedule()">Сохранить расписание</button>
+        <button class="btn btn-danger" onclick="stopSchedule()">Остановить выгрузку</button>
+      </div>
+      <div id="schedResult" class="result-msg"></div>
+
+      <div class="schedule-info" id="schedInfo">
+        <br>
+        <strong>Текущее расписание:</strong><br>
+        <span id="schedCurrent" style="color:#888">Расписание не настроено</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── About page ──────────────────────────────────────────────────── -->
+  <div class="page" id="page-about">
+    <div class="page-title">О приложении</div>
+    <div class="card">
+      <div class="about-text">
+        <p>Приложение выгружает данные из <strong>Bitrix24</strong> через BI-коннектор и загружает их в <strong>ClickHouse</strong>.</p>
+
+        <h3>Как начать работу</h3>
+        <ul>
+          <li>Откройте <strong>Настройка подключения</strong> и заполните данные Bitrix24 и ClickHouse.</li>
+          <li>Нажмите <strong>Проверить подключение</strong> — оба должны быть зелёными.</li>
+          <li>Перейдите в <strong>Отправка данных</strong>, выберите сущность, период и запустите выгрузку.</li>
+          <li>Для автоматических выгрузок настройте <strong>Расписание</strong>.</li>
+        </ul>
+
+        <h3>Как получить BI-ключ Bitrix24</h3>
+        <ul>
+          <li>CRM → BI-аналитика → Управление ключами</li>
+          <li>Создайте новый ключ или скопируйте существующий</li>
+        </ul>
+
+        <h3>Примечания</h3>
+        <ul>
+          <li>Скорость выгрузки зависит от скорости интернета и Bitrix24 API, а не от мощности ПК.</li>
+          <li>Таблицы в ClickHouse создаются автоматически при первой выгрузке.</li>
+          <li>Настройки хранятся в файле <code>config.json</code> в папке приложения.</li>
+          <li>Расписание работает пока приложение запущено.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════
+let ENTITIES = {};
+let DATE_LABELS = {};
+let activeController = null;
+let currentFilterEntity = '';
+
+// ─── LocalStorage helpers ──────────────────────────────────────
+const LS = {
+  get(key)      { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+  set(key, val) { localStorage.setItem(key, JSON.stringify(val)); },
+  del(key)      { localStorage.removeItem(key); },
+};
+
+function _lsKey(groupId) { return `bi_${groupId}_${currentFilterEntity}`; }
+
+// Save checked values; save null when everything is checked (= "no filter" = default)
+function saveCheckboxState(groupId) {
+  if (!currentFilterEntity) return;
+  const all = getAllValues(groupId), chk = getCheckedValues(groupId);
+  LS.set(_lsKey(groupId), all.length === chk.length ? null : chk);
+}
+
+// Apply saved state to already-rendered checkboxes. Returns true if a saved state existed.
+function restoreCheckboxState(groupId) {
+  const saved = LS.get(_lsKey(groupId));
+  if (!saved) return false;          // null → all checked (default), undefined → never saved
+  const set = new Set(saved);
+  document.querySelectorAll(`#${groupId} input`).forEach(cb => cb.checked = set.has(cb.value));
+  return true;
+}
+
+// Wire auto-save on every change in the group
+function addAutoSave(groupId, extraCb) {
+  document.querySelectorAll(`#${groupId} input`).forEach(cb => {
+    cb.addEventListener('change', () => { saveCheckboxState(groupId); if (extraCb) extraCb(); });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('page-' + item.dataset.page).classList.add('active');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════
+async function boot() {
+  [ENTITIES, DATE_LABELS] = await Promise.all([
+    fetch('/api/entities').then(r => r.json()),
+    fetch('/api/date-field-labels').then(r => r.json()),
+  ]);
+
+  fillEntitySelect('exportEntity');
+  fillEntitySelect('schedEntity');
+
+  // Save entity on change + restore date field pref
+  document.getElementById('exportEntity').addEventListener('change', () => {
+    LS.set('bi_export_entity', v('exportEntity'));
+    onEntityChange('export');
+  });
+  document.getElementById('exportDateField').addEventListener('change', () => {
+    if (currentFilterEntity) LS.set(`bi_date_field_${currentFilterEntity}`, v('exportDateField'));
+  });
+  document.getElementById('schedEntity').addEventListener('change', () => onEntityChange('sched'));
+
+  // Default dates (first day of current month → today)
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  document.getElementById('exportStartDate').value = fmt(firstDay);
+  document.getElementById('exportEndDate').value   = fmt(today);
+
+  await loadSettings();
+  await loadSchedule();
+  await refreshConnectionBadges();
+
+  // Restore last selected entity (triggers filter load)
+  const savedEntity = LS.get('bi_export_entity');
+  if (savedEntity) {
+    const sel = document.getElementById('exportEntity');
+    sel.value = savedEntity;
+    if (sel.value === savedEntity) onEntityChange('export');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Entity selects
+// ═══════════════════════════════════════════════════════════════
+function fillEntitySelect(selectId) {
+  const sel = document.getElementById(selectId);
+  // Reset fully — removes both <option> and <optgroup> elements
+  sel.innerHTML = '<option value="">— выберите сущность —</option>';
+
+  for (const [cat, items] of Object.entries(ENTITIES)) {
+    const grp = document.createElement('optgroup');
+    grp.label = cat;
+    items.forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.code;
+      opt.textContent = e.name;
+      grp.appendChild(opt);
+    });
+    sel.appendChild(grp);
+  }
+}
+
+function findEntity(code) {
+  for (const items of Object.values(ENTITIES)) {
+    const e = items.find(x => x.code === code);
+    if (e) return e;
+  }
+  return null;
+}
+
+function onEntityChange(prefix) {
+  const code  = document.getElementById(prefix + 'Entity').value;
+  const entity = code ? findEntity(code) : null;
+  const df    = document.getElementById(prefix + 'DateField');
+  const sec   = document.getElementById(prefix === 'export' ? 'dateSection' : 'schedDateSection');
+
+  df.innerHTML = '';
+
+  if (!entity || entity.date_fields.length === 0) {
+    if (prefix === 'export') sec.style.display = 'none';
+  } else {
+    sec.style.display = '';
+    entity.date_fields.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f;
+      opt.textContent = DATE_LABELS[f] || f;
+      df.appendChild(opt);
+    });
+  }
+
+  if (prefix === 'export') loadEntityFilters(code || '');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════════════
+async function loadSettings() {
+  const cfg = await fetch('/api/settings').then(r => r.json());
+  document.getElementById('settPortal').value  = cfg.bitrix?.portal       || '';
+  document.getElementById('settBiKey').value   = cfg.bitrix?.bi_key       || '';
+  document.getElementById('settWebhook').value = cfg.bitrix?.rest_webhook || '';
+  document.getElementById('settHost').value   = cfg.clickhouse?.host     || '';
+  document.getElementById('settPort').value   = cfg.clickhouse?.port     || 8443;
+  document.getElementById('settDb').value     = cfg.clickhouse?.database || 'default';
+  document.getElementById('settUser').value   = cfg.clickhouse?.username || 'admin';
+  document.getElementById('settPass').value   = cfg.clickhouse?.password || '';
+
+  // Load custom entities
+  const customs = cfg.custom_entities || [];
+  document.getElementById('customEntitiesList').innerHTML = '';
+  customs.forEach(e => addCustomEntityRow(e.code, e.name));
+  refreshCustomOptions(customs);
+}
+
+async function saveSettings(silent = false) {
+  const customs = collectCustomEntities();
+  const payload = {
+    bitrix:          { portal: v('settPortal'), bi_key: v('settBiKey'), rest_webhook: v('settWebhook') },
+    clickhouse:      { host: v('settHost'), port: +v('settPort'), database: v('settDb'),
+                       username: v('settUser'), password: v('settPass') },
+    custom_entities: customs,
+  };
+  await fetch('/api/settings', { method: 'POST', headers: json_h(), body: JSON.stringify(payload) });
+
+  // Refresh custom options in entity selects
+  refreshCustomOptions(customs);
+
+  if (!silent) showMsg('settResult', 'ok', 'Настройки сохранены');
+}
+
+// ─── Auto-load smart processes ────────────────────────────────
+async function autoLoadSmartProcesses() {
+  // Save current settings first so webhook is available server-side
+  await saveSettings(true);
+
+  const btn = document.getElementById('btnAutoLoad');
+  btn.disabled = true;
+  btn.textContent = '⟳ Загрузка...';
+  showMsg('autoLoadResult', 'info', 'Запрос к Bitrix24...');
+
+  try {
+    const res = await fetch('/api/smart-processes').then(r => r.json());
+
+    if (res.detail) {
+      showMsg('autoLoadResult', 'err', res.detail);
+      return;
+    }
+
+    if (!res.length) {
+      showMsg('autoLoadResult', 'info', 'Смарт-процессы не найдены на портале');
+      return;
+    }
+
+    // Clear existing custom rows and fill with fetched data
+    document.getElementById('customEntitiesList').innerHTML = '';
+    res.forEach(e => addCustomEntityRow(e.code, e.name));
+    showMsg('autoLoadResult', 'ok', `Загружено ${res.length} сущностей — нажми "Сохранить настройки"`);
+  } catch(e) {
+    showMsg('autoLoadResult', 'err', 'Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⟳ Загрузить автоматически';
+  }
+}
+
+// ─── Custom entities helpers ───────────────────────────────────
+function addCustomEntityRow(code = '', name = '') {
+  const wrap = document.getElementById('customEntitiesList');
+  const row  = document.createElement('div');
+  row.className = 'custom-entity-row';
+  row.innerHTML = `
+    <input type="text" class="form-control ce-code" placeholder="crm_dynamic_items_105" value="${code}">
+    <input type="text" class="form-control ce-name" placeholder="Название (напр. СП: Расходы)" value="${name}">
+    <button class="btn-remove" title="Удалить" onclick="this.parentElement.remove()">×</button>
+  `;
+  wrap.appendChild(row);
+}
+
+function collectCustomEntities() {
+  return Array.from(document.querySelectorAll('.custom-entity-row')).map(row => ({
+    code: row.querySelector('.ce-code').value.trim(),
+    name: row.querySelector('.ce-name').value.trim(),
+  })).filter(e => e.code);
+}
+
+function refreshCustomOptions(customs) {
+  ['exportEntity', 'schedEntity'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    // Remove old custom group if any
+    const old = sel.querySelector('optgroup[data-custom="1"]');
+    if (old) old.remove();
+    if (!customs || !customs.length) return;
+    // Add fresh group
+    const grp = document.createElement('optgroup');
+    grp.label = 'Смарт-процессы (свои)';
+    grp.dataset.custom = '1';
+    customs.forEach(e => {
+      if (!e.code) return;
+      const opt = document.createElement('option');
+      opt.value = e.code;
+      opt.textContent = e.name || e.code;
+      grp.appendChild(opt);
+    });
+    sel.appendChild(grp);
+  });
+}
+
+async function testConnection() {
+  // Сначала сохраняем текущие данные формы, потом тестируем
+  await saveSettings(true);
+  showMsg('settResult', 'info', 'Проверка подключения...');
+  const res = await fetch('/api/test-connection',
+    { method: 'POST', headers: json_h(), body: JSON.stringify({test_bitrix: true, test_clickhouse: true}) }
+  ).then(r => r.json());
+
+  const parts = [];
+  if ('bitrix' in res)     parts.push('Bitrix24: ' + (res.bitrix ? '✅' : '❌ ' + (res.bitrix_error || '')));
+  if ('clickhouse' in res) parts.push('ClickHouse: ' + (res.clickhouse ? '✅' : '❌ ' + (res.clickhouse_error || '')));
+
+  const ok = res.bitrix && res.clickhouse;
+  showMsg('settResult', ok ? 'ok' : 'err', parts.join('  |  '));
+  await refreshConnectionBadges();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Connection badges
+// ═══════════════════════════════════════════════════════════════
+async function refreshConnectionBadges() {
+  const st = await fetch('/api/connection-status').then(r => r.json());
+  const ok = st.bitrix === true && st.clickhouse === true;
+  const unknown = st.bitrix === null && st.clickhouse === null;
+
+  const cls = unknown ? 'unk' : ok ? 'ok' : 'err';
+  const txt = unknown
+    ? 'Подключение не проверено'
+    : ok
+      ? 'Подключение работает'
+      : 'Ошибка подключения — проверьте настройки';
+
+  ['export-conn-badge', 'sched-conn-badge'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'conn-badge ' + cls;
+    el.querySelector('span').textContent = txt;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Filters
+// ═══════════════════════════════════════════════════════════════
+async function loadEntityFilters(entity) {
+  currentFilterEntity = entity;
+  const sec     = document.getElementById('filtersSection');
+  const loading = document.getElementById('filtersLoading');
+
+  // Reset
+  ['funnelsGroup','stagesGroup','fieldsGroup'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
+  ['funnelsList','stagesList','fieldsList'].forEach(id =>
+    document.getElementById(id).innerHTML = '');
+
+  if (!entity) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  loading.style.display = 'inline';
+
+  const [fieldsRes, funnelsRes] = await Promise.all([
+    fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
+    fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
+  ]);
+
+  // Fields
+  if (fieldsRes.fields && fieldsRes.fields.length) {
+    renderCheckboxes('fieldsList', fieldsRes.fields.map(f => ({id: f, name: f})), null);
+    restoreCheckboxState('fieldsList');
+    addAutoSave('fieldsList', null);
+    document.getElementById('fieldsGroup').style.display = 'block';
+  }
+
+  // Funnels (deals + smart processes)
+  if (funnelsRes.length) {
+    renderCheckboxes('funnelsList', funnelsRes, null);  // onChange added via addAutoSave below
+    restoreCheckboxState('funnelsList');
+    // Load stages for currently-selected funnels (respecting saved funnel state)
+    const selFunnels = getCheckedValues('funnelsList');
+    await loadStages(entity, selFunnels.length ? selFunnels : funnelsRes.map(f => f.id), true);
+    // Wire auto-save + stage reload on funnel change
+    addAutoSave('funnelsList', onFunnelChange);
+    document.getElementById('funnelsGroup').style.display = 'block';
+  } else if (entity === 'crm_lead') {
+    const stages = await fetch(`/api/crm-stages?entity=crm_lead`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('stagesList', stages, null);
+      restoreCheckboxState('stagesList');
+      addAutoSave('stagesList', null);
+      document.getElementById('stagesGroup').style.display = 'block';
+    }
+  } else if (entity.startsWith('crm_dynamic_items_') && !entity.endsWith('_product_row')) {
+    const stages = await fetch(`/api/crm-stages?entity=${entity}`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('stagesList', stages, null);
+      restoreCheckboxState('stagesList');
+      addAutoSave('stagesList', null);
+      document.getElementById('stagesGroup').style.display = 'block';
+    }
+  }
+
+  // Restore date field preference
+  const savedDf = LS.get(`bi_date_field_${entity}`);
+  if (savedDf) {
+    const dfSel = document.getElementById('exportDateField');
+    if (dfSel) dfSel.value = savedDf;
+  }
+
+  loading.style.display = 'none';
+}
+
+async function onFunnelChange() {
+  const checked = getCheckedValues('funnelsList');
+  const all     = getAllValues('funnelsList');
+  await loadStages(currentFilterEntity, checked.length ? checked : all);
+}
+
+async function loadStages(entity, categoryIds, restoreState = false) {
+  const prev   = new Set(getCheckedValues('stagesList'));
+  const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
+  const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
+  if (!stages.length) { document.getElementById('stagesGroup').style.display = 'none'; return; }
+  renderCheckboxes('stagesList', stages, null);
+  if (restoreState) {
+    restoreCheckboxState('stagesList');   // use saved state on initial load
+  } else {
+    document.querySelectorAll('#stagesList input').forEach(cb => { if (prev.has(cb.value)) cb.checked = true; });
+  }
+  addAutoSave('stagesList', null);
+  document.getElementById('stagesGroup').style.display = 'block';
+}
+
+function renderCheckboxes(containerId, items, onChange) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  items.forEach(item => {
+    const lbl = document.createElement('label');
+    lbl.className = 'checkbox-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = item.id; cb.checked = true;
+    if (onChange) cb.addEventListener('change', onChange);
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' ' + (item.name || item.id)));
+    c.appendChild(lbl);
+  });
+}
+
+function checkAll(containerId, state) {
+  document.querySelectorAll(`#${containerId} input`).forEach(cb => cb.checked = state);
+  if (containerId === 'funnelsList') onFunnelChange();
+}
+
+function getCheckedValues(id) {
+  return Array.from(document.querySelectorAll(`#${id} input:checked`)).map(cb => cb.value);
+}
+function getAllValues(id) {
+  return Array.from(document.querySelectorAll(`#${id} input`)).map(cb => cb.value);
+}
+
+function collectDimensionsFilters() {
+  const filters = [];
+  const allF = getAllValues('funnelsList'), chkF = getCheckedValues('funnelsList');
+  if (allF.length && chkF.length && chkF.length < allF.length)
+    filters.push({fieldName:'CATEGORY_ID', values: chkF, type:'INCLUDE', operator:'IN'});
+
+  const allS = getAllValues('stagesList'), chkS = getCheckedValues('stagesList');
+  if (allS.length && chkS.length && chkS.length < allS.length)
+    filters.push({fieldName:'STAGE_ID', values: chkS, type:'INCLUDE', operator:'IN'});
+
+  return filters;
+}
+
+function collectSelectedFields() {
+  const all = getAllValues('fieldsList'), chk = getCheckedValues('fieldsList');
+  return (all.length && chk.length < all.length) ? chk : [];
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Export (fetch streaming POST)
+// ═══════════════════════════════════════════════════════════════
+function runExport() {
+  const entity = v('exportEntity');
+  if (!entity) { logError('Выберите сущность'); return; }
+
+  const df = v('exportDateField'), start_date = v('exportStartDate'), end_date = v('exportEndDate');
+  if (df && (!start_date || !end_date)) { logError('Укажите период выгрузки'); return; }
+
+  if (activeController) { activeController.abort(); activeController = null; }
+
+  const btn = document.getElementById('btnExport');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Выгружаю...';
+
+  document.getElementById('progressLog').innerHTML = '';
+  document.getElementById('progressTotal').textContent = '0 строк';
+  document.getElementById('progressStatus').textContent = 'Выгрузка...';
+  document.getElementById('progressFooter').style.display = 'none';
+  document.getElementById('exportProgress').style.display = 'block';
+
+  const body = {entity, date_field: df, start_date, end_date};
+  const df_list = collectDimensionsFilters();
+  const fld_list = collectSelectedFields();
+  if (df_list.length)  body.dimensions_filters = df_list;
+  if (fld_list.length) body.fields = fld_list;
+
+  const controller = new AbortController();
+  activeController = controller;
+
+  fetch('/api/export-stream', {
+    method: 'POST', headers: json_h(), signal: controller.signal, body: JSON.stringify(body)
+  }).then(async resp => {
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try { handleStreamEvent(JSON.parse(line.slice(6))); } catch(e) {}
+        }
+      }
+    }
+  }).catch(e => {
+    if (e.name === 'AbortError') return;
+    resetExportBtn();
+    document.getElementById('progressStatus').textContent = 'Ошибка';
+    showFooter('err', '❌ ' + e.message);
+  });
+}
+
+function handleStreamEvent(d) {
+  if (d.status === 'done') {
+    activeController = null; resetExportBtn();
+    document.getElementById('progressStatus').textContent = 'Готово';
+    document.getElementById('progressTotal').textContent = num(d.total) + ' строк итого';
+    showFooter('ok', `✅ Выгрузка завершена — ${num(d.total)} строк`);
+    return;
+  }
+  if (d.status === 'error' && !d.date) {
+    activeController = null; resetExportBtn();
+    document.getElementById('progressStatus').textContent = 'Ошибка';
+    showFooter('err', '❌ ' + d.error);
+    return;
+  }
+  if (d.status === 'info') { addLogRow(null, d.message, 'info'); return; }
+  if (d.date) {
+    addLogRow(d.date, d.rows, d.status);
+    document.getElementById('progressTotal').textContent = num(d.total) + ' строк';
+  }
+}
+
+function addLogRow(date, rowsOrMsg, status) {
+  const log = document.getElementById('progressLog');
+  const row = document.createElement('div');
+  row.className = 'log-row log-' + status;
+
+  if (status === 'info') {
+    row.innerHTML = `<span class="log-msg">${rowsOrMsg}</span>`;
+  } else {
+    const dateStr = date ? fmtDate(date) : '';
+    const icon    = status === 'ok' ? '✅' : '❌';
+    row.innerHTML = `
+      <span class="log-date">${dateStr}</span>
+      <span class="log-count">${num(rowsOrMsg)}</span>
+      <span class="log-label">строк</span>
+      <span class="log-icon">${icon}</span>`;
+  }
+
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showFooter(type, text) {
+  const f = document.getElementById('progressFooter');
+  f.style.display = '';
+  f.className = 'progress-footer ' + type;
+  document.getElementById('progressSummary').textContent = text;
+}
+
+function logError(msg) {
+  document.getElementById('exportProgress').style.display = 'block';
+  document.getElementById('progressLog').innerHTML = '';
+  document.getElementById('progressStatus').textContent = 'Ошибка';
+  showFooter('err', '❌ ' + msg);
+}
+
+function resetExportBtn() {
+  const btn = document.getElementById('btnExport');
+  btn.disabled = false;
+  btn.innerHTML = 'Запустить выгрузку';
+}
+
+function fmtDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function num(n) { return Number(n).toLocaleString('ru-RU'); }
+
+// ═══════════════════════════════════════════════════════════════
+// Schedule
+// ═══════════════════════════════════════════════════════════════
+async function loadSchedule() {
+  const sch = await fetch('/api/schedule').then(r => r.json());
+  if (!sch || !sch.entity) return;
+
+  if (sch.frequency) document.getElementById('schedFreq').value = sch.frequency;
+  if (sch.days_back) document.getElementById('schedDaysBack').value = sch.days_back;
+
+  // Set entity and trigger date field population
+  const sel = document.getElementById('schedEntity');
+  sel.value = sch.entity || '';
+  onEntityChange('sched');
+
+  if (sch.date_field) {
+    setTimeout(() => { document.getElementById('schedDateField').value = sch.date_field; }, 50);
+  }
+
+  updateSchedInfo(sch);
+}
+
+async function saveSchedule() {
+  const entity = v('schedEntity');
+  if (!entity) return showMsg('schedResult', 'err', 'Выберите сущность');
+
+  const payload = {
+    enabled:    true,
+    frequency:  v('schedFreq'),
+    entity,
+    date_field: v('schedDateField') || '',
+    days_back:  +v('schedDaysBack') || 1,
+  };
+
+  await fetch('/api/schedule', { method: 'POST', headers: json_h(), body: JSON.stringify(payload) });
+  showMsg('schedResult', 'ok', 'Расписание сохранено');
+  updateSchedInfo(payload);
+}
+
+async function stopSchedule() {
+  await fetch('/api/schedule', { method: 'DELETE' });
+  showMsg('schedResult', 'err', 'Расписание остановлено');
+  document.getElementById('schedCurrent').textContent = 'Расписание не настроено';
+}
+
+function updateSchedInfo(sch) {
+  if (!sch.enabled) return;
+  const freqLabel = { hourly: 'Раз в час', daily: 'Раз в сутки', weekly: 'Раз в неделю' }[sch.frequency] || sch.frequency;
+  const entity = findEntity(sch.entity);
+  const name   = entity ? entity.name : sch.entity;
+  document.getElementById('schedCurrent').textContent =
+    `${freqLabel} | Сущность: ${name} | Глубина: ${sch.days_back} дн.`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════
+function v(id) { return document.getElementById(id).value.trim(); }
+function json_h() { return { 'Content-Type': 'application/json' }; }
+function fmt(d) { return d.toISOString().slice(0, 10); }
+
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  el.className = 'result-msg ' + type;
+  el.textContent = text;
+}
+
+boot();
+</script>
+</body>
+</html>

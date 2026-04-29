@@ -1,0 +1,14 @@
+# Credentials — never commit this
+config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
