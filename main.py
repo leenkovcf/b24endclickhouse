@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = "config.json"
-app = FastAPI(title="BI-коннектор Bitrix24 → ClickHouse")
+app = FastAPI(title="b24endclickhouse")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -38,7 +38,7 @@ ENTITIES = {
         {"code": "crm_lead_status_history","name": "История статусов лидов",           "date_fields": []},
         {"code": "crm_lead_product_row",   "name": "Товары в лидах",                   "date_fields": []},
         {"code": "crm_deal",               "name": "Сделки",                           "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
-        {"code": "crm_deal_uf",            "name": "Пользовательские поля сделок",     "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
+        {"code": "crm_deal_uf",            "name": "Пользовательские поля сделок",     "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
         {"code": "crm_deal_stage_history", "name": "История статусов сделок",          "date_fields": []},
         {"code": "crm_deal_product_row",   "name": "Товары в сделках",                 "date_fields": []},
         {"code": "crm_company",            "name": "Компании",                         "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
@@ -452,6 +452,91 @@ async def api_crm_funnels(entity: str = "crm_deal"):
     except Exception as exc:
         logger.warning("crm-funnels: %s", exc)
         return []
+
+_ENTITY_FIELDS_REST: dict = {
+    "crm_deal":                "crm.deal.fields",
+    "crm_deal_uf":             "crm.deal.fields",
+    "crm_deal_stage_history":  "crm.deal.fields",
+    "crm_deal_product_row":    "crm.deal.fields",
+    "crm_lead":                "crm.lead.fields",
+    "crm_lead_uf":             "crm.lead.fields",
+    "crm_lead_status_history": "crm.lead.fields",
+    "crm_lead_product_row":    "crm.lead.fields",
+    "crm_contact":             "crm.contact.fields",
+    "crm_contact_uf":          "crm.contact.fields",
+    "crm_company":             "crm.company.fields",
+    "crm_company_uf":          "crm.company.fields",
+}
+
+# Entities that have UF fields: map to the userfield.list REST method
+_UF_METHODS: dict = {
+    "crm_deal_uf":    "crm.deal.userfield.list",
+    "crm_lead_uf":    "crm.lead.userfield.list",
+    "crm_contact_uf": "crm.contact.userfield.list",
+    "crm_company_uf": "crm.company.userfield.list",
+}
+
+def _label_from_uf(uf: dict) -> str:
+    """Extract the best available Russian label from a userfield record."""
+    for key in ("EDIT_FORM_LABEL", "LIST_COLUMN_LABEL"):
+        lbl = uf.get(key)
+        if isinstance(lbl, dict):
+            # Try Russian first, then any available language
+            text = lbl.get("ru") or lbl.get("en") or next(iter(lbl.values()), "")
+            if text:
+                return text
+    return ""
+
+@app.get("/api/field-labels")
+async def api_field_labels(entity: str):
+    """Return {FIELD_CODE: Russian_title} fetched from Bitrix24 REST API."""
+    config  = load_config()
+    webhook = config["bitrix"].get("rest_webhook", "").strip().rstrip("/")
+    if not webhook:
+        return {}
+    try:
+        labels: dict = {}
+
+        if entity in _ENTITY_FIELDS_REST:
+            # Standard field titles from crm.<entity>.fields
+            data   = _rest(webhook, _ENTITY_FIELDS_REST[entity])
+            result = data.get("result", {})
+            for k, v in result.items():
+                if isinstance(v, dict) and v.get("title") and v["title"] != k:
+                    labels[k] = v["title"]
+
+            # For _uf entities: override/extend with proper UF labels from userfield.list
+            if entity in _UF_METHODS:
+                try:
+                    uf_data = _rest(webhook, _UF_METHODS[entity],
+                                    {"order[FIELD_NAME]": "ASC", "start": -1})
+                    for uf in uf_data.get("result", []):
+                        code  = uf.get("FIELD_NAME", "")
+                        label = _label_from_uf(uf)
+                        if code and label and label != code:
+                            labels[code] = label
+                except Exception as uf_exc:
+                    logger.warning("userfield.list for %s: %s", entity, uf_exc)
+
+        elif entity.startswith("crm_dynamic_items_") and not entity.endswith("_product_row"):
+            eid  = entity.replace("crm_dynamic_items_", "").split("_")[0]
+            data = _rest(webhook, "crm.item.fields", {"entityTypeId": eid})
+            raw  = data.get("result", {})
+            fields = raw.get("fields", raw) if isinstance(raw, dict) else {}
+            for k, v in fields.items():
+                if not isinstance(v, dict) or not v.get("title"):
+                    continue
+                title = v["title"]
+                upper = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", k).upper()
+                if title != k:
+                    labels[k] = title
+                if upper != k and title != upper:
+                    labels[upper] = title
+
+        return labels
+    except Exception as exc:
+        logger.warning("field-labels: %s", exc)
+        return {}
 
 @app.get("/api/crm-stages")
 async def api_crm_stages(entity: str, category_ids: str = ""):

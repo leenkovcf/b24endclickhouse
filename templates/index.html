@@ -3,45 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BI-коннектор Bitrix24 → ClickHouse</title>
+  <title>b24endclickhouse</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<!-- ═══ Header ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ Header ════════════════════════════════════════════════════ -->
 <header class="app-header">
-  <h1>BI-коннектор Bitrix24 → ClickHouse</h1>
+  <h1>b24endclickhouse</h1>
   <span class="tariff-badge">локальный запуск</span>
 </header>
 
 <div class="app-body">
 
-<!-- ═══ Sidebar ══════════════════════════════════════════════════════════ -->
+<!-- ═══ Sidebar ═══════════════════════════════════════════════════ -->
 <nav class="sidebar">
-  <div class="nav-item active" data-page="export">
-    <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-    Отправка данных
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">
+      <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    </div>
+    <div class="sidebar-logo-text">
+      <div class="sidebar-logo-name">b24endclickhouse</div>
+      <div class="sidebar-logo-sub">v1.0</div>
+    </div>
   </div>
-  <div class="nav-item" data-page="settings">
-    <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.04.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-    Настройка подключения
-  </div>
-  <div class="nav-item" data-page="schedule">
-    <svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
-    Расписание
-  </div>
-  <div class="nav-item" data-page="about">
-    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-    О приложении
+
+  <div class="sidebar-nav">
+    <div class="nav-item active" data-page="export">
+      <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+      Отправка данных
+    </div>
+    <div class="nav-item" data-page="settings">
+      <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.04.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      Подключение
+    </div>
+    <div class="nav-item" data-page="schedule">
+      <svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+      Расписание
+    </div>
+    <div class="nav-item" data-page="about">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+      О приложении
+    </div>
   </div>
 </nav>
 
-<!-- ═══ Main content ══════════════════════════════════════════════════════ -->
+<!-- ═══ Main content ═══════════════════════════════════════════════ -->
 <main class="main">
 
-  <!-- ── Export page ─────────────────────────────────────────────────── -->
+  <!-- ── Export page ───────────────────────────────────────────── -->
   <div class="page active" id="page-export">
-    <div class="page-title">Отправка данных в ClickHouse</div>
+    <div class="page-header">
+      <div class="page-title">Отправка данных</div>
+      <div class="page-subtitle">Выберите сущность и период — данные будут загружены в ClickHouse</div>
+    </div>
 
     <div class="card">
       <div id="export-conn-badge" class="conn-badge unk">
@@ -101,20 +119,33 @@
         </div>
 
         <div id="fieldsGroup" style="display:none">
+          <div id="fieldsRuGroup" style="display:none">
+            <label class="form-label">
+              Поля (русское название)
+              <span class="sel-btns">
+                <a onclick="checkAllFields(true)">Все</a> /
+                <a onclick="checkAllFields(false)">Снять</a>
+              </span>
+            </label>
+            <div id="fieldsRuList" class="checkbox-grid"></div>
+          </div>
           <label class="form-label">
-            Поля для выгрузки
+            <span id="fieldsOrigTitle">Поля для выгрузки</span>
             <span class="sel-btns">
-              <a onclick="checkAll('fieldsList',true)">Все</a> /
-              <a onclick="checkAll('fieldsList',false)">Снять</a>
+              <a onclick="checkAllFields(true)">Все</a> /
+              <a onclick="checkAllFields(false)">Снять</a>
             </span>
           </label>
           <div id="fieldsList" class="checkbox-grid"></div>
         </div>
       </div>
 
-      <button class="btn btn-primary" id="btnExport" onclick="runExport()">
-        Запустить выгрузку
-      </button>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnExport" onclick="runExport()">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+          Запустить выгрузку
+        </button>
+      </div>
 
       <!-- Live progress log -->
       <div id="exportProgress" class="export-progress" style="display:none">
@@ -130,9 +161,12 @@
     </div>
   </div>
 
-  <!-- ── Settings page ───────────────────────────────────────────────── -->
+  <!-- ── Settings page ─────────────────────────────────────────── -->
   <div class="page" id="page-settings">
-    <div class="page-title">Настройка подключения к ClickHouse</div>
+    <div class="page-header">
+      <div class="page-title">Настройка подключения</div>
+      <div class="page-subtitle">Укажите данные Bitrix24 и ClickHouse для начала работы</div>
+    </div>
 
     <div class="card">
       <div class="section-title">Bitrix24</div>
@@ -148,18 +182,21 @@
                placeholder="Ключ из раздела BI-аналитика">
       </div>
       <div class="form-group">
-        <label class="form-label">REST API Webhook <span style="font-weight:400;color:#aaa">(необязательно — для автозагрузки смарт-процессов)</span></label>
+        <label class="form-label">
+          REST API Webhook
+          <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0">(необязательно)</span>
+        </label>
         <input type="text" id="settWebhook" class="form-control"
-               placeholder="https://b24.tepleko.ru/rest/1/abc123xyz/">
-        <div style="font-size:12px;color:#999;margin-top:4px">
-          Профиль → Разработчикам → Входящий вебхук (права: CRM)
+               placeholder="https://b24.example.ru/rest/1/abc123xyz/">
+        <div style="font-size:11px;color:var(--text-3);margin-top:5px">
+          Профиль → Разработчикам → Входящий вебхук (права: CRM) — для автозагрузки смарт-процессов
         </div>
       </div>
 
       <div class="section-title">ClickHouse</div>
 
       <div class="form-group">
-        <label class="form-label">Хост ClickHouse</label>
+        <label class="form-label">Хост</label>
         <input type="text" id="settHost" class="form-control"
                placeholder="c-xxx.rw.mdb.yandexcloud.net">
       </div>
@@ -168,11 +205,11 @@
         <input type="number" id="settPort" class="form-control" value="8443">
       </div>
       <div class="form-group">
-        <label class="form-label">Имя базы данных</label>
+        <label class="form-label">База данных</label>
         <input type="text" id="settDb" class="form-control" value="default">
       </div>
       <div class="form-group">
-        <label class="form-label">Имя пользователя</label>
+        <label class="form-label">Пользователь</label>
         <input type="text" id="settUser" class="form-control" value="admin">
       </div>
       <div class="form-group">
@@ -181,21 +218,21 @@
       </div>
 
       <div class="section-title">Смарт-процессы и кастомные сущности</div>
-      <p style="font-size:13px;color:#666;margin-bottom:12px;">
+      <p style="font-size:13px;color:var(--text-2);margin-bottom:14px;line-height:1.6">
         Смарт-процессы уникальны для каждого портала. Добавь их вручную: код таблицы вида
         <code>crm_dynamic_items_105</code> и название. ID смарт-процесса можно найти в Bitrix24 →
         CRM → Настройки → Смарт-процессы (в URL страницы).
       </p>
       <div id="customEntitiesList"></div>
-      <div class="btn-row" style="margin-bottom:4px">
-        <button class="btn btn-secondary" style="font-size:13px;padding:7px 14px"
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn btn-secondary" style="font-size:12px;padding:8px 14px"
                 onclick="addCustomEntityRow()">+ Добавить вручную</button>
-        <button class="btn btn-primary" style="font-size:13px;padding:7px 14px"
+        <button class="btn btn-primary" style="font-size:12px;padding:8px 14px"
                 id="btnAutoLoad" onclick="autoLoadSmartProcesses()">⟳ Загрузить автоматически</button>
       </div>
       <div id="autoLoadResult" class="result-msg"></div>
 
-      <div class="btn-row" style="margin-top:16px">
+      <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" onclick="saveSettings()">Сохранить настройки</button>
         <button class="btn btn-secondary" onclick="testConnection()">Проверить подключение</button>
       </div>
@@ -203,9 +240,12 @@
     </div>
   </div>
 
-  <!-- ── Schedule page ───────────────────────────────────────────────── -->
+  <!-- ── Schedule page ─────────────────────────────────────────── -->
   <div class="page" id="page-schedule">
-    <div class="page-title">Настройка расписания выгрузки</div>
+    <div class="page-header">
+      <div class="page-title">Расписание</div>
+      <div class="page-subtitle">Автоматическая выгрузка по расписанию (работает пока приложение запущено)</div>
+    </div>
 
     <div class="card">
       <div id="sched-conn-badge" class="conn-badge unk">
@@ -214,7 +254,7 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">Периодичность выгрузки</label>
+        <label class="form-label">Периодичность</label>
         <select id="schedFreq" class="form-control">
           <option value="hourly">Раз в час</option>
           <option value="daily" selected>Раз в сутки</option>
@@ -223,7 +263,7 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">Выгружаемая сущность</label>
+        <label class="form-label">Сущность</label>
         <select id="schedEntity" class="form-control">
           <option value="">— выберите сущность —</option>
         </select>
@@ -242,28 +282,30 @@
 
       <div class="btn-row">
         <button class="btn btn-primary" onclick="saveSchedule()">Сохранить расписание</button>
-        <button class="btn btn-danger" onclick="stopSchedule()">Остановить выгрузку</button>
+        <button class="btn btn-danger" onclick="stopSchedule()">Остановить</button>
       </div>
       <div id="schedResult" class="result-msg"></div>
 
       <div class="schedule-info" id="schedInfo">
-        <br>
         <strong>Текущее расписание:</strong><br>
-        <span id="schedCurrent" style="color:#888">Расписание не настроено</span>
+        <span id="schedCurrent" style="color:var(--text-3)">Расписание не настроено</span>
       </div>
     </div>
   </div>
 
-  <!-- ── About page ──────────────────────────────────────────────────── -->
+  <!-- ── About page ────────────────────────────────────────────── -->
   <div class="page" id="page-about">
-    <div class="page-title">О приложении</div>
+    <div class="page-header">
+      <div class="page-title">О приложении</div>
+      <div class="page-subtitle">Описание, инструкция и примечания</div>
+    </div>
     <div class="card">
       <div class="about-text">
-        <p>Приложение выгружает данные из <strong>Bitrix24</strong> через BI-коннектор и загружает их в <strong>ClickHouse</strong>.</p>
+        <p>Приложение выгружает данные из <strong>Bitrix24</strong> через BI-коннектор и загружает их в <strong>ClickHouse</strong> для дальнейшего анализа в Yandex DataLens или других BI-инструментах.</p>
 
         <h3>Как начать работу</h3>
         <ul>
-          <li>Откройте <strong>Настройка подключения</strong> и заполните данные Bitrix24 и ClickHouse.</li>
+          <li>Откройте <strong>Подключение</strong> и заполните данные Bitrix24 и ClickHouse.</li>
           <li>Нажмите <strong>Проверить подключение</strong> — оба должны быть зелёными.</li>
           <li>Перейдите в <strong>Отправка данных</strong>, выберите сущность, период и запустите выгрузку.</li>
           <li>Для автоматических выгрузок настройте <strong>Расписание</strong>.</li>
@@ -597,24 +639,39 @@ async function loadEntityFilters(entity) {
   const loading = document.getElementById('filtersLoading');
 
   // Reset
-  ['funnelsGroup','stagesGroup','fieldsGroup'].forEach(id =>
+  ['funnelsGroup','stagesGroup','fieldsGroup','fieldsRuGroup'].forEach(id =>
     document.getElementById(id).style.display = 'none');
-  ['funnelsList','stagesList','fieldsList'].forEach(id =>
+  ['funnelsList','stagesList','fieldsList','fieldsRuList'].forEach(id =>
     document.getElementById(id).innerHTML = '');
+  document.getElementById('fieldsOrigTitle').textContent = 'Поля для выгрузки';
 
   if (!entity) { sec.style.display = 'none'; return; }
   sec.style.display = 'block';
   loading.style.display = 'inline';
 
-  const [fieldsRes, funnelsRes] = await Promise.all([
+  const [fieldsRes, funnelsRes, labelsRes] = await Promise.all([
     fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
     fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
+    fetch(`/api/field-labels?entity=${entity}`).then(r => r.json()).catch(() => ({})),
   ]);
 
   // Fields
   if (fieldsRes.fields && fieldsRes.fields.length) {
+    // Original names
     renderCheckboxes('fieldsList', fieldsRes.fields.map(f => ({id: f, name: f})), null);
+
+    // Russian names panel (only when labels are available from REST API)
+    const ruFields = fieldsRes.fields.filter(f => labelsRes[f] && labelsRes[f] !== f);
+    if (ruFields.length > 0) {
+      renderCheckboxes('fieldsRuList', ruFields.map(f => ({id: f, name: labelsRes[f]})), null);
+      wireSyncRuToOrig();
+      wireSyncOrigToRu();
+      document.getElementById('fieldsRuGroup').style.display = 'block';
+      document.getElementById('fieldsOrigTitle').textContent = 'Оригинальные названия';
+    }
+
     restoreCheckboxState('fieldsList');
+    syncFieldsToRu();
     addAutoSave('fieldsList', null);
     document.getElementById('fieldsGroup').style.display = 'block';
   }
@@ -629,6 +686,15 @@ async function loadEntityFilters(entity) {
     // Wire auto-save + stage reload on funnel change
     addAutoSave('funnelsList', onFunnelChange);
     document.getElementById('funnelsGroup').style.display = 'block';
+  } else if (entity === 'crm_deal') {
+    // No custom funnels — load stages for the default pipeline (id=0)
+    const stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('stagesList', stages, null);
+      restoreCheckboxState('stagesList');
+      addAutoSave('stagesList', null);
+      document.getElementById('stagesGroup').style.display = 'block';
+    }
   } else if (entity === 'crm_lead') {
     const stages = await fetch(`/api/crm-stages?entity=crm_lead`).then(r => r.json()).catch(() => []);
     if (stages.length) {
@@ -696,6 +762,43 @@ function renderCheckboxes(containerId, items, onChange) {
 function checkAll(containerId, state) {
   document.querySelectorAll(`#${containerId} input`).forEach(cb => cb.checked = state);
   if (containerId === 'funnelsList') onFunnelChange();
+}
+
+// Sync both fields panels and save state
+function checkAllFields(state) {
+  document.querySelectorAll('#fieldsList input, #fieldsRuList input').forEach(cb => cb.checked = state);
+  saveCheckboxState('fieldsList');
+}
+
+// Wire: Ru checkbox click → update Orig + dispatch change (triggers auto-save)
+function wireSyncRuToOrig() {
+  document.querySelectorAll('#fieldsRuList input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const orig = document.querySelector(`#fieldsList input[value="${cb.value}"]`);
+      if (orig && orig.checked !== cb.checked) {
+        orig.checked = cb.checked;
+        orig.dispatchEvent(new Event('change'));
+      }
+    });
+  });
+}
+
+// Wire: Orig checkbox click → update Ru (no extra event needed, Orig is source of truth)
+function wireSyncOrigToRu() {
+  document.querySelectorAll('#fieldsList input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const ru = document.querySelector(`#fieldsRuList input[value="${cb.value}"]`);
+      if (ru && ru.checked !== cb.checked) ru.checked = cb.checked;
+    });
+  });
+}
+
+// Copy current Orig checkbox states to Ru panel (used after restoreCheckboxState)
+function syncFieldsToRu() {
+  document.querySelectorAll('#fieldsList input').forEach(cb => {
+    const ru = document.querySelector(`#fieldsRuList input[value="${cb.value}"]`);
+    if (ru) ru.checked = cb.checked;
+  });
 }
 
 function getCheckedValues(id) {
@@ -837,7 +940,7 @@ function logError(msg) {
 function resetExportBtn() {
   const btn = document.getElementById('btnExport');
   btn.disabled = false;
-  btn.innerHTML = 'Запустить выгрузку';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg> Запустить выгрузку';
 }
 
 function fmtDate(iso) {

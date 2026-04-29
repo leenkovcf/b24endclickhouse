@@ -1,6 +1,6 @@
 @echo off
 echo ============================================
-echo  BI-коннектор Bitrix24 -> ClickHouse
+echo  b24endclickhouse
 echo ============================================
 cd /d "%~dp0"
 echo Запуск на http://127.0.0.1:8000
