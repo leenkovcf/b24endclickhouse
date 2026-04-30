@@ -244,7 +244,7 @@
   <div class="page" id="page-schedule">
     <div class="page-header">
       <div class="page-title">Расписание</div>
-      <div class="page-subtitle">Автоматическая выгрузка по расписанию (работает пока приложение запущено)</div>
+      <div class="page-subtitle">Автоматическая выгрузка по расписанию — работает пока приложение запущено</div>
     </div>
 
     <div class="card">
@@ -253,13 +253,29 @@
         <span>Проверка подключения...</span>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Периодичность</label>
-        <select id="schedFreq" class="form-control">
-          <option value="hourly">Раз в час</option>
-          <option value="daily" selected>Раз в сутки</option>
-          <option value="weekly">Раз в неделю</option>
-        </select>
+      <div class="sched-note">
+        <strong>Как работает:</strong> В указанное время приложение выгружает данные за последние <em>N дней назад</em> в ClickHouse.
+        Глубина выгрузки задаётся ниже — по умолчанию 1 день для ежедневной, 7 для еженедельной, 30 для ежемесячной.<br>
+        <strong>Ежедневно</strong> — каждый день в указанное время.
+        <strong>Еженедельно</strong> — каждый понедельник.
+        <strong>Ежемесячно</strong> — 1-го числа каждого месяца.<br>
+        Все фильтры (воронки, стадии, поля) сохраняются вместе с расписанием и применяются при каждом запуске.<br>
+        ⚠ <strong>Расписание активно только пока приложение запущено.</strong>
+      </div>
+
+      <div class="sched-freq-row">
+        <div class="form-group flex-1">
+          <label class="form-label">Периодичность</label>
+          <select id="schedFreq" class="form-control">
+            <option value="daily" selected>Ежедневно</option>
+            <option value="weekly">Еженедельно (по пн)</option>
+            <option value="monthly">Ежемесячно (1-го числа)</option>
+          </select>
+        </div>
+        <div class="form-group flex-fix">
+          <label class="form-label">Время (МСК)</label>
+          <input type="time" id="schedTime" class="form-control" value="00:01">
+        </div>
       </div>
 
       <div class="form-group">
@@ -275,8 +291,58 @@
           <select id="schedDateField" class="form-control"></select>
         </div>
         <div class="form-group">
-          <label class="form-label">Глубина выгрузки (дней назад)</label>
+          <label class="form-label">
+            Глубина выгрузки (дней назад)
+            <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0"> — сколько дней назад от момента запуска включать в выгрузку</span>
+          </label>
           <input type="number" id="schedDaysBack" class="form-control" value="1" min="1" max="365">
+        </div>
+      </div>
+
+      <!-- Schedule filters -->
+      <div id="sFiltersSection" style="display:none">
+        <div class="filters-header">
+          <span class="filters-title">Фильтры</span>
+          <span id="sFiltersLoading" class="filters-loading" style="display:none">загрузка...</span>
+        </div>
+        <div class="filters-row">
+          <div id="sFunnelsGroup" style="display:none;flex:1;min-width:0">
+            <label class="form-label">Воронки
+              <span class="sel-btns">
+                <a onclick="checkAll('sFunnelsList',true)">Все</a> /
+                <a onclick="checkAll('sFunnelsList',false)">Снять</a>
+              </span>
+            </label>
+            <div id="sFunnelsList" class="checkbox-group"></div>
+          </div>
+          <div id="sStagesGroup" style="display:none;flex:1;min-width:0">
+            <label class="form-label">Стадии
+              <span class="sel-btns">
+                <a onclick="checkAll('sStagesList',true)">Все</a> /
+                <a onclick="checkAll('sStagesList',false)">Снять</a>
+              </span>
+            </label>
+            <div id="sStagesList" class="checkbox-group"></div>
+          </div>
+        </div>
+        <div id="sFieldsGroup" style="display:none">
+          <div id="sFieldsRuGroup" style="display:none">
+            <label class="form-label">Поля (русское название)
+              <span class="sel-btns">
+                <a onclick="checkAllSchedFields(true)">Все</a> /
+                <a onclick="checkAllSchedFields(false)">Снять</a>
+              </span>
+            </label>
+            <div id="sFieldsRuList" class="checkbox-grid"></div>
+          </div>
+          <label class="form-label">
+            <span id="sFieldsOrigTitle">Поля для выгрузки</span>
+            <span class="sel-btns">
+              <a onclick="checkAllSchedFields(true)">Все</a> /
+              <a onclick="checkAllSchedFields(false)">Снять</a>
+            </span>
+          </label>
+          <div id="sFieldsList" class="checkbox-grid"></div>
         </div>
       </div>
 
@@ -339,6 +405,7 @@ let ENTITIES = {};
 let DATE_LABELS = {};
 let activeController = null;
 let currentFilterEntity = '';
+let currentSchedEntity = '';
 
 // ─── LocalStorage helpers ──────────────────────────────────────
 const LS = {
@@ -404,7 +471,14 @@ async function boot() {
   document.getElementById('exportDateField').addEventListener('change', () => {
     if (currentFilterEntity) LS.set(`bi_date_field_${currentFilterEntity}`, v('exportDateField'));
   });
-  document.getElementById('schedEntity').addEventListener('change', () => onEntityChange('sched'));
+  document.getElementById('schedEntity').addEventListener('change', async () => {
+    onEntityChange('sched');
+    await loadSchedFilters(v('schedEntity'));
+  });
+  document.getElementById('schedFreq').addEventListener('change', () => {
+    const daysMap = { daily: 1, weekly: 7, monthly: 30 };
+    document.getElementById('schedDaysBack').value = daysMap[v('schedFreq')] || 1;
+  });
 
   // Default dates (first day of current month → today)
   const today = new Date();
@@ -660,10 +734,13 @@ async function loadEntityFilters(entity) {
     // Original names
     renderCheckboxes('fieldsList', fieldsRes.fields.map(f => ({id: f, name: f})), null);
 
-    // Russian names panel (only when labels are available from REST API)
-    const ruFields = fieldsRes.fields.filter(f => labelsRes[f] && labelsRes[f] !== f);
-    if (ruFields.length > 0) {
-      renderCheckboxes('fieldsRuList', ruFields.map(f => ({id: f, name: labelsRes[f]})), null);
+    // Russian names panel — all fields in same order, Russian label where available, code otherwise
+    const hasTranslations = fieldsRes.fields.some(f => labelsRes[f] && labelsRes[f] !== f);
+    if (hasTranslations) {
+      renderCheckboxes('fieldsRuList',
+        fieldsRes.fields.map(f => ({id: f, name: (labelsRes[f] && labelsRes[f] !== f) ? labelsRes[f] : f})),
+        null
+      );
       wireSyncRuToOrig();
       wireSyncOrigToRu();
       document.getElementById('fieldsRuGroup').style.display = 'block';
@@ -734,9 +811,9 @@ async function loadStages(entity, categoryIds, restoreState = false) {
   const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
   const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
   if (!stages.length) { document.getElementById('stagesGroup').style.display = 'none'; return; }
-  renderCheckboxes('stagesList', stages, null);
+  renderStagesGrouped('stagesList', stages, getFunnelNameMap('funnelsList'), null);
   if (restoreState) {
-    restoreCheckboxState('stagesList');   // use saved state on initial load
+    restoreCheckboxState('stagesList');
   } else {
     document.querySelectorAll('#stagesList input').forEach(cb => { if (prev.has(cb.value)) cb.checked = true; });
   }
@@ -757,6 +834,48 @@ function renderCheckboxes(containerId, items, onChange) {
     lbl.appendChild(document.createTextNode(' ' + (item.name || item.id)));
     c.appendChild(lbl);
   });
+}
+
+// Render stages grouped by category with funnel name headers.
+// funnelNameMap: {category_id -> funnel_name}. If only 1 group, renders flat (no header).
+function renderStagesGrouped(containerId, stages, funnelNameMap, onChange) {
+  const groups = [];
+  const seen   = {};
+  stages.forEach(s => {
+    const cat = s.category_id || '';
+    if (!(cat in seen)) { seen[cat] = groups.length; groups.push({cat, items: []}); }
+    groups[seen[cat]].items.push(s);
+  });
+
+  const multi = groups.length > 1;
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  groups.forEach(g => {
+    if (multi) {
+      const hdr = document.createElement('div');
+      hdr.className = 'stages-group-header';
+      hdr.textContent = funnelNameMap[g.cat] || g.cat || 'Без воронки';
+      c.appendChild(hdr);
+    }
+    g.items.forEach(item => {
+      const lbl = document.createElement('label');
+      lbl.className = 'checkbox-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.value = item.id; cb.checked = true;
+      if (onChange) cb.addEventListener('change', onChange);
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(' ' + (item.name || item.id)));
+      c.appendChild(lbl);
+    });
+  });
+}
+
+function getFunnelNameMap(funnelsListId) {
+  const map = {};
+  document.querySelectorAll(`#${funnelsListId} input`).forEach(cb => {
+    map[cb.value] = cb.parentElement.textContent.trim();
+  });
+  return map;
 }
 
 function checkAll(containerId, state) {
@@ -812,11 +931,11 @@ function collectDimensionsFilters() {
   const filters = [];
   const allF = getAllValues('funnelsList'), chkF = getCheckedValues('funnelsList');
   if (allF.length && chkF.length && chkF.length < allF.length)
-    filters.push({fieldName:'CATEGORY_ID', values: chkF, type:'INCLUDE', operator:'IN'});
+    filters.push({fieldName:'CATEGORY_ID', values: chkF, type:'INCLUDE', operator:'IN_LIST'});
 
   const allS = getAllValues('stagesList'), chkS = getCheckedValues('stagesList');
   if (allS.length && chkS.length && chkS.length < allS.length)
-    filters.push({fieldName:'STAGE_ID', values: chkS, type:'INCLUDE', operator:'IN'});
+    filters.push({fieldName:'STAGE_ID', values: chkS, type:'INCLUDE', operator:'IN_LIST'});
 
   return filters;
 }
@@ -958,9 +1077,9 @@ async function loadSchedule() {
   if (!sch || !sch.entity) return;
 
   if (sch.frequency) document.getElementById('schedFreq').value = sch.frequency;
+  if (sch.time_msk)  document.getElementById('schedTime').value  = sch.time_msk;
   if (sch.days_back) document.getElementById('schedDaysBack').value = sch.days_back;
 
-  // Set entity and trigger date field population
   const sel = document.getElementById('schedEntity');
   sel.value = sch.entity || '';
   onEntityChange('sched');
@@ -968,6 +1087,10 @@ async function loadSchedule() {
   if (sch.date_field) {
     setTimeout(() => { document.getElementById('schedDateField').value = sch.date_field; }, 50);
   }
+
+  await loadSchedFilters(sch.entity);
+  if (sch.dimensions_filters) restoreSchedDimensionsFilters(sch.dimensions_filters);
+  if (sch.fields) restoreSchedFields(sch.fields);
 
   updateSchedInfo(sch);
 }
@@ -979,10 +1102,16 @@ async function saveSchedule() {
   const payload = {
     enabled:    true,
     frequency:  v('schedFreq'),
+    time_msk:   v('schedTime') || '00:01',
     entity,
     date_field: v('schedDateField') || '',
     days_back:  +v('schedDaysBack') || 1,
   };
+
+  const df_list  = collectSchedDimensionsFilters();
+  const fld_list = collectSchedSelectedFields();
+  if (df_list.length)  payload.dimensions_filters = df_list;
+  if (fld_list.length) payload.fields = fld_list;
 
   await fetch('/api/schedule', { method: 'POST', headers: json_h(), body: JSON.stringify(payload) });
   showMsg('schedResult', 'ok', 'Расписание сохранено');
@@ -997,11 +1126,158 @@ async function stopSchedule() {
 
 function updateSchedInfo(sch) {
   if (!sch.enabled) return;
-  const freqLabel = { hourly: 'Раз в час', daily: 'Раз в сутки', weekly: 'Раз в неделю' }[sch.frequency] || sch.frequency;
-  const entity = findEntity(sch.entity);
-  const name   = entity ? entity.name : sch.entity;
+  const freqLabel = {
+    daily:   'Ежедневно',
+    weekly:  'Еженедельно (пн)',
+    monthly: 'Ежемесячно (1-го)',
+  }[sch.frequency] || sch.frequency;
+  const timePart = sch.time_msk ? ` в ${sch.time_msk} МСК` : '';
+  const entity   = findEntity(sch.entity);
+  const name     = entity ? entity.name : sch.entity;
   document.getElementById('schedCurrent').textContent =
-    `${freqLabel} | Сущность: ${name} | Глубина: ${sch.days_back} дн.`;
+    `${freqLabel}${timePart} | Сущность: ${name} | Глубина: ${sch.days_back} дн.`;
+}
+
+// ─── Schedule filters ─────────────────────────────────────────
+async function loadSchedFilters(entity) {
+  currentSchedEntity = entity;
+  const sec     = document.getElementById('sFiltersSection');
+  const loading = document.getElementById('sFiltersLoading');
+
+  ['sFunnelsGroup','sStagesGroup','sFieldsGroup','sFieldsRuGroup'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
+  ['sFunnelsList','sStagesList','sFieldsList','sFieldsRuList'].forEach(id =>
+    document.getElementById(id).innerHTML = '');
+  document.getElementById('sFieldsOrigTitle').textContent = 'Поля для выгрузки';
+
+  if (!entity) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  loading.style.display = 'inline';
+
+  const [fieldsRes, funnelsRes, labelsRes] = await Promise.all([
+    fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
+    fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
+    fetch(`/api/field-labels?entity=${entity}`).then(r => r.json()).catch(() => ({})),
+  ]);
+
+  if (fieldsRes.fields && fieldsRes.fields.length) {
+    renderCheckboxes('sFieldsList', fieldsRes.fields.map(f => ({id: f, name: f})), null);
+    const hasTranslations = fieldsRes.fields.some(f => labelsRes[f] && labelsRes[f] !== f);
+    if (hasTranslations) {
+      renderCheckboxes('sFieldsRuList',
+        fieldsRes.fields.map(f => ({id: f, name: (labelsRes[f] && labelsRes[f] !== f) ? labelsRes[f] : f})),
+        null
+      );
+      wireSyncSchedRuToOrig();
+      wireSyncSchedOrigToRu();
+      document.getElementById('sFieldsRuGroup').style.display = 'block';
+      document.getElementById('sFieldsOrigTitle').textContent = 'Оригинальные названия';
+    }
+    document.getElementById('sFieldsGroup').style.display = 'block';
+  }
+
+  if (funnelsRes.length) {
+    renderCheckboxes('sFunnelsList', funnelsRes, null);
+    await loadSchedStages(entity, funnelsRes.map(f => f.id));
+    document.querySelectorAll('#sFunnelsList input').forEach(cb =>
+      cb.addEventListener('change', onSchedFunnelChange));
+    document.getElementById('sFunnelsGroup').style.display = 'block';
+  } else if (entity === 'crm_deal') {
+    const stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('sStagesList', stages, null);
+      document.getElementById('sStagesGroup').style.display = 'block';
+    }
+  } else if (entity === 'crm_lead') {
+    const stages = await fetch(`/api/crm-stages?entity=crm_lead`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('sStagesList', stages, null);
+      document.getElementById('sStagesGroup').style.display = 'block';
+    }
+  } else if (entity.startsWith('crm_dynamic_items_') && !entity.endsWith('_product_row')) {
+    const stages = await fetch(`/api/crm-stages?entity=${entity}`).then(r => r.json()).catch(() => []);
+    if (stages.length) {
+      renderCheckboxes('sStagesList', stages, null);
+      document.getElementById('sStagesGroup').style.display = 'block';
+    }
+  }
+
+  loading.style.display = 'none';
+}
+
+async function loadSchedStages(entity, categoryIds) {
+  const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
+  const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
+  if (!stages.length) { document.getElementById('sStagesGroup').style.display = 'none'; return; }
+  renderStagesGrouped('sStagesList', stages, getFunnelNameMap('sFunnelsList'), null);
+  document.getElementById('sStagesGroup').style.display = 'block';
+}
+
+async function onSchedFunnelChange() {
+  const checked = getCheckedValues('sFunnelsList');
+  const all     = getAllValues('sFunnelsList');
+  await loadSchedStages(currentSchedEntity, checked.length ? checked : all);
+}
+
+function checkAllSchedFields(state) {
+  document.querySelectorAll('#sFieldsList input, #sFieldsRuList input').forEach(cb => cb.checked = state);
+}
+
+function wireSyncSchedRuToOrig() {
+  document.querySelectorAll('#sFieldsRuList input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const orig = document.querySelector(`#sFieldsList input[value="${cb.value}"]`);
+      if (orig && orig.checked !== cb.checked) orig.checked = cb.checked;
+    });
+  });
+}
+
+function wireSyncSchedOrigToRu() {
+  document.querySelectorAll('#sFieldsList input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const ru = document.querySelector(`#sFieldsRuList input[value="${cb.value}"]`);
+      if (ru && ru.checked !== cb.checked) ru.checked = cb.checked;
+    });
+  });
+}
+
+function syncSchedFieldsToRu() {
+  document.querySelectorAll('#sFieldsList input').forEach(cb => {
+    const ru = document.querySelector(`#sFieldsRuList input[value="${cb.value}"]`);
+    if (ru) ru.checked = cb.checked;
+  });
+}
+
+function collectSchedDimensionsFilters() {
+  const filters = [];
+  const allF = getAllValues('sFunnelsList'), chkF = getCheckedValues('sFunnelsList');
+  if (allF.length && chkF.length && chkF.length < allF.length)
+    filters.push({fieldName:'CATEGORY_ID', values: chkF, type:'INCLUDE', operator:'IN_LIST'});
+  const allS = getAllValues('sStagesList'), chkS = getCheckedValues('sStagesList');
+  if (allS.length && chkS.length && chkS.length < allS.length)
+    filters.push({fieldName:'STAGE_ID', values: chkS, type:'INCLUDE', operator:'IN_LIST'});
+  return filters;
+}
+
+function collectSchedSelectedFields() {
+  const all = getAllValues('sFieldsList'), chk = getCheckedValues('sFieldsList');
+  return (all.length && chk.length < all.length) ? chk : [];
+}
+
+function restoreSchedDimensionsFilters(filters) {
+  if (!filters || !filters.length) return;
+  filters.forEach(f => {
+    const containerId = f.fieldName === 'CATEGORY_ID' ? 'sFunnelsList' : 'sStagesList';
+    const set = new Set(f.values);
+    document.querySelectorAll(`#${containerId} input`).forEach(cb => { cb.checked = set.has(cb.value); });
+  });
+}
+
+function restoreSchedFields(fields) {
+  if (!fields || !fields.length) return;
+  const set = new Set(fields);
+  document.querySelectorAll('#sFieldsList input').forEach(cb => { cb.checked = set.has(cb.value); });
+  syncSchedFieldsToRu();
 }
 
 // ═══════════════════════════════════════════════════════════════

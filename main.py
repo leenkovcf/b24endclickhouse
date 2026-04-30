@@ -24,7 +24,7 @@ app = FastAPI(title="b24endclickhouse")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-scheduler = BackgroundScheduler(timezone="UTC")
+scheduler = BackgroundScheduler(timezone="Europe/Moscow")
 export_status = {"running": False, "rows": 0, "error": None, "last_run": None}
 connection_status = {"bitrix": None, "clickhouse": None}
 
@@ -36,11 +36,11 @@ ENTITIES = {
         {"code": "crm_lead",               "name": "Лиды",                             "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_lead_uf",            "name": "Пользовательские поля лидов",      "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_lead_status_history","name": "История статусов лидов",           "date_fields": []},
-        {"code": "crm_lead_product_row",   "name": "Товары в лидах",                   "date_fields": []},
+        {"code": "crm_lead_product_row",   "name": "Товары в лидах",                   "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_deal",               "name": "Сделки",                           "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
         {"code": "crm_deal_uf",            "name": "Пользовательские поля сделок",     "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
         {"code": "crm_deal_stage_history", "name": "История статусов сделок",          "date_fields": []},
-        {"code": "crm_deal_product_row",   "name": "Товары в сделках",                 "date_fields": []},
+        {"code": "crm_deal_product_row",   "name": "Товары в сделках",                 "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
         {"code": "crm_company",            "name": "Компании",                         "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_company_uf",         "name": "Пользовательские поля компаний",   "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_contact",            "name": "Контакты",                         "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
@@ -108,9 +108,9 @@ DATE_FIELD_LABELS = {
 }
 
 SCHEDULE_LABELS = {
-    "hourly": "Раз в час",
-    "daily":  "Раз в сутки",
-    "weekly": "Раз в неделю",
+    "daily":   "Ежедневно",
+    "weekly":  "Еженедельно (пн)",
+    "monthly": "Ежемесячно (1-го)",
 }
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ def load_config() -> dict:
     return {
         "bitrix":     {"portal": "", "bi_key": ""},
         "clickhouse": {"host": "", "port": 8443, "database": "default", "username": "admin", "password": ""},
-        "schedule":   {"enabled": False, "frequency": "daily", "entity": "", "date_field": "DATE_CREATE", "days_back": 1},
+        "schedule":   {"enabled": False, "frequency": "daily", "time_msk": "00:01", "entity": "", "date_field": "DATE_CREATE", "days_back": 1},
     }
 
 def save_config(config: dict) -> None:
@@ -152,14 +152,21 @@ def fetch_from_bitrix(portal: str, bi_key: str, table: str,
         payload["dateRange"]    = {"startDate": start_date, "endDate": end_date}
         payload["configParams"] = {"timeFilterColumn": date_field}
     if dimensions_filters:
-        payload["dimensionsFilters"] = dimensions_filters
+        payload["dimensionsFilters"] = [[f] for f in dimensions_filters]
+    logger.info("BI request table=%s filters=%s fields=%s",
+                table, json.dumps(payload.get("dimensionsFilters")), fields)
     if fields:
-        payload["fields"] = fields
+        payload["fields"] = [{"name": f} for f in fields]
     if limit:
         payload["limit"] = limit
     resp = requests.post(url, params={"table": table}, json=payload, timeout=300)
     resp.raise_for_status()
-    return resp.json()
+    raw = resp.json()
+    if isinstance(raw, dict):
+        logger.error("BI connector error: %s", raw)
+        msg = raw.get("errorDescription") or raw.get("error_description") or raw.get("error") or str(raw)
+        raise Exception(f"BI connector ошибка: {msg}")
+    return raw
 
 def _rest(webhook: str, method: str, params: dict = None) -> dict:
     """Call Bitrix24 REST API via webhook."""
@@ -310,9 +317,11 @@ def _do_export(data: dict) -> None:
             config["bitrix"]["portal"],
             config["bitrix"]["bi_key"],
             data["entity"],
-            data.get("date_field") or None,
-            data.get("start_date") or None,
-            data.get("end_date")   or None,
+            data.get("date_field")         or None,
+            data.get("start_date")         or None,
+            data.get("end_date")           or None,
+            data.get("dimensions_filters") or None,
+            data.get("fields")             or None,
         )
         rows = push_to_clickhouse(config, data["entity"], raw)
         export_status = {"running": False, "rows": rows, "error": None,
@@ -328,10 +337,12 @@ def _run_scheduled() -> None:
     sch    = config.get("schedule", {})
     days   = int(sch.get("days_back", 1))
     _do_export({
-        "entity":     sch.get("entity", ""),
-        "date_field": sch.get("date_field", "DATE_CREATE"),
-        "start_date": (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
-        "end_date":   datetime.now().strftime("%Y-%m-%d"),
+        "entity":             sch.get("entity", ""),
+        "date_field":         sch.get("date_field", "DATE_CREATE"),
+        "start_date":         (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
+        "end_date":           datetime.now().strftime("%Y-%m-%d"),
+        "dimensions_filters": sch.get("dimensions_filters") or None,
+        "fields":             sch.get("fields") or None,
     })
 
 def _apply_schedule(config: dict) -> None:
@@ -340,15 +351,21 @@ def _apply_schedule(config: dict) -> None:
     sch = config.get("schedule", {})
     if not sch.get("enabled"):
         return
+    time_str = sch.get("time_msk", "00:01")
+    try:
+        h, m = [int(x) for x in time_str.split(":")]
+    except Exception:
+        h, m = 0, 1
+    freq = sch.get("frequency", "daily")
     triggers = {
-        "hourly": CronTrigger(minute=0),
-        "daily":  CronTrigger(hour=3, minute=0),
-        "weekly": CronTrigger(day_of_week="mon", hour=3, minute=0),
+        "daily":   CronTrigger(hour=h, minute=m),
+        "weekly":  CronTrigger(day_of_week="mon", hour=h, minute=m),
+        "monthly": CronTrigger(day=1, hour=h, minute=m),
     }
-    trigger = triggers.get(sch.get("frequency", "daily"))
+    trigger = triggers.get(freq)
     if trigger:
         scheduler.add_job(_run_scheduled, trigger, id="export_job", replace_existing=True)
-        logger.info("Schedule set: %s", sch.get("frequency"))
+        logger.info("Schedule set: %s at %s MSK", freq, time_str)
 
 # ---------------------------------------------------------------------------
 # FastAPI routes
@@ -651,7 +668,7 @@ async def api_crm_stages(entity: str, category_ids: str = ""):
                 data = _rest(webhook, "crm.dealcategory.stage.list", {"id": cat_id})
                 for s in data.get("result", []):
                     if s["STATUS_ID"] not in seen:
-                        stages.append({"id": s["STATUS_ID"], "name": s["NAME"]})
+                        stages.append({"id": s["STATUS_ID"], "name": s["NAME"], "category_id": cat_id})
                         seen.add(s["STATUS_ID"])
         elif entity == "crm_lead":
             data = _rest(webhook, "crm.status.list", {"filter[ENTITY_ID]": "STATUS"})
@@ -661,7 +678,9 @@ async def api_crm_stages(entity: str, category_ids: str = ""):
             eid  = entity.replace("crm_dynamic_items_", "").split("_")[0]
             data = _rest(webhook, "crm.item.stage.list", {"entityTypeId": eid})
             raw  = data.get("result", {}).get("stages", [])
-            stages = [{"id": str(s.get("statusId", s.get("id", ""))), "name": s.get("name", "")}
+            stages = [{"id": str(s.get("statusId", s.get("id", ""))),
+                       "name": s.get("name", ""),
+                       "category_id": str(s.get("categoryId", ""))}
                       for s in raw]
     except Exception as exc:
         logger.warning("crm-stages: %s", exc)
@@ -682,31 +701,68 @@ async def api_export_stream(data: dict):
         bi_key   = config["bitrix"]["bi_key"]
         do_daily = bool(date_field and start_date and end_date)
 
+        # ── Диагностика: показываем что применяется ─────────────────
+        if dimensions_filters:
+            parts = []
+            for f in dimensions_filters:
+                vals = f.get("values", [])
+                v_str = ", ".join(str(v) for v in vals[:5])
+                if len(vals) > 5:
+                    v_str += f"... (+{len(vals)-5})"
+                parts.append(f"{f.get('fieldName')} IN [{v_str}]")
+            yield f"data: {json.dumps({'status':'info','message':'Фильтры: ' + ' | '.join(parts)})}\n\n"
+        if fields:
+            fields_preview = ", ".join(fields[:8]) + ("..." if len(fields) > 8 else "")
+            yield f"data: {json.dumps({'status':'info','message':f'Поля ({len(fields)}): {fields_preview}'})}\n\n"
+
         if not do_daily:
             try:
                 yield f"data: {json.dumps({'status': 'info', 'message': 'Запрос данных из Bitrix24...'})}\n\n"
-                raw  = await asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
-                                               None, None, None, dimensions_filters, fields)
-                yield f"data: {json.dumps({'status': 'info', 'message': 'Запись в ClickHouse...'})}\n\n"
+                _task = asyncio.ensure_future(
+                    asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
+                                      None, None, None, dimensions_filters, fields))
+                while True:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
+                        break
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                raw  = _task.result()
+                bi_n = len(raw) - 1 if isinstance(raw, list) and raw else 0
+                yield f"data: {json.dumps({'status':'info','message':f'BI connector вернул: {bi_n} строк'})}\n\n"
                 rows = await asyncio.to_thread(push_to_clickhouse, config, entity, raw)
                 yield f"data: {json.dumps({'status': 'done', 'rows': rows, 'total': rows})}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
             return
 
-        current = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt  = datetime.strptime(end_date,   "%Y-%m-%d")
-        total   = 0
+        current  = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt   = datetime.strptime(end_date,   "%Y-%m-%d")
+        total    = 0
+        first    = True
         while current <= end_dt:
             day = current.strftime("%Y-%m-%d")
             try:
-                raw  = await asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
-                                               date_field, day, day, dimensions_filters, fields)
+                _task = asyncio.ensure_future(
+                    asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
+                                      date_field, day, day, dimensions_filters, fields))
+                while True:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
+                        break
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                raw = _task.result()
+                if first:
+                    bi_n = len(raw) - 1 if isinstance(raw, list) and raw else 0
+                    yield f"data: {json.dumps({'status':'info','message':f'BI connector за {day}: {bi_n} строк (тип ответа: {type(raw).__name__})'})}\n\n"
+                    first = False
                 rows = await asyncio.to_thread(push_to_clickhouse, config, entity, raw)
                 total += rows
                 yield f"data: {json.dumps({'date': day, 'rows': rows, 'total': total, 'status': 'ok'})}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'error', 'error': str(exc)})}\n\n"
+                first = False
             current += timedelta(days=1)
 
         yield f"data: {json.dumps({'status': 'done', 'total': total})}\n\n"
