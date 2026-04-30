@@ -275,27 +275,41 @@ def _convert(value, ch_type: str):
     except Exception:
         return None if "String" not in ch_type else str(value)
 
+def _table_col_types(client, table_name: str) -> dict:
+    """Read actual column types from an existing ClickHouse table."""
+    try:
+        rows = client.query(f"DESCRIBE TABLE `{table_name}`").result_rows
+        return {r[0]: r[1] for r in rows}
+    except Exception:
+        return {}
+
 def push_to_clickhouse(config: dict, table_name: str, raw: list) -> int:
     if len(raw) < 2:
         return 0
 
-    headers   = raw[0]
-    rows      = raw[1:]
-    sample_n  = min(200, len(rows))
-    col_types = [
+    headers  = raw[0]
+    rows     = raw[1:]
+    sample_n = min(200, len(rows))
+    inferred = [
         _infer_type([rows[j][i] if i < len(rows[j]) else None for j in range(sample_n)])
         for i in range(len(headers))
     ]
 
-    safe = re.sub(r"[^\w]", "_", table_name)
+    safe   = re.sub(r"[^\w]", "_", table_name)
     client = get_ch_client(config)
-    cols_sql = ",\n  ".join(f"`{h}` {t}" for h, t in zip(headers, col_types))
+    cols_sql = ",\n  ".join(f"`{h}` {t}" for h, t in zip(headers, inferred))
     client.command(f"""
         CREATE TABLE IF NOT EXISTS `{safe}` (
           {cols_sql}
         ) ENGINE = MergeTree()
         ORDER BY tuple()
     """)
+
+    # Use the actual table schema (not freshly inferred) so type conversions
+    # stay consistent across days when column values change character (e.g.
+    # CRM_PRODUCT_ID going from single int → comma-separated string).
+    existing  = _table_col_types(client, safe)
+    col_types = [existing.get(h, inferred[i]) for i, h in enumerate(headers)]
 
     converted = []
     for r in rows:
@@ -492,6 +506,9 @@ async def api_entity_fields(entity: str):
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
+# Entities derived from crm_deal that share its funnel/stage structure
+_DEAL_VARIANTS = {"crm_deal", "crm_deal_uf", "crm_deal_stage_history", "crm_deal_product_row"}
+
 @app.get("/api/crm-funnels")
 async def api_crm_funnels(entity: str = "crm_deal"):
     """Return pipeline categories for deals or smart processes."""
@@ -500,7 +517,7 @@ async def api_crm_funnels(entity: str = "crm_deal"):
     if not webhook:
         return []
     try:
-        if entity == "crm_deal":
+        if entity in _DEAL_VARIANTS:
             data = _rest(webhook, "crm.category.list", {"entityTypeId": 2})
             cats = data.get("result", {}).get("categories", [])
         elif entity.startswith("crm_dynamic_items_"):
@@ -663,7 +680,7 @@ async def api_crm_stages(entity: str, category_ids: str = ""):
     stages: list = []
     seen:   set  = set()
     try:
-        if entity == "crm_deal":
+        if entity in _DEAL_VARIANTS:
             for cat_id in ids:
                 data = _rest(webhook, "crm.dealcategory.stage.list", {"id": cat_id})
                 for s in data.get("result", []):
@@ -685,6 +702,11 @@ async def api_crm_stages(entity: str, category_ids: str = ""):
     except Exception as exc:
         logger.warning("crm-stages: %s", exc)
     return stages
+
+def fmtday(iso: str) -> str:
+    """'2026-01-08' → '08.01.2026'"""
+    y, m, d = iso.split("-")
+    return f"{d}.{m}.{y}"
 
 @app.post("/api/export-stream")
 async def api_export_stream(data: dict):
@@ -726,7 +748,7 @@ async def api_export_stream(data: dict):
                         await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
                         break
                     except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
+                        yield f"data: {json.dumps({'status': 'info', 'message': 'Ожидание ответа Bitrix24...'})}\n\n"
                 raw  = _task.result()
                 bi_n = len(raw) - 1 if isinstance(raw, list) and raw else 0
                 yield f"data: {json.dumps({'status':'info','message':f'BI connector вернул: {bi_n} строк'})}\n\n"
@@ -739,7 +761,6 @@ async def api_export_stream(data: dict):
         current  = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt   = datetime.strptime(end_date,   "%Y-%m-%d")
         total    = 0
-        first    = True
         while current <= end_dt:
             day = current.strftime("%Y-%m-%d")
             try:
@@ -751,18 +772,13 @@ async def api_export_stream(data: dict):
                         await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
                         break
                     except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-                raw = _task.result()
-                if first:
-                    bi_n = len(raw) - 1 if isinstance(raw, list) and raw else 0
-                    yield f"data: {json.dumps({'status':'info','message':f'BI connector за {day}: {bi_n} строк (тип ответа: {type(raw).__name__})'})}\n\n"
-                    first = False
+                        yield f"data: {json.dumps({'status': 'info', 'message': f'Ожидание ответа за {fmtday(day)}...'})}\n\n"
+                raw  = _task.result()
                 rows = await asyncio.to_thread(push_to_clickhouse, config, entity, raw)
                 total += rows
                 yield f"data: {json.dumps({'date': day, 'rows': rows, 'total': total, 'status': 'ok'})}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'error', 'error': str(exc)})}\n\n"
-                first = False
             current += timedelta(days=1)
 
         yield f"data: {json.dumps({'status': 'done', 'total': total})}\n\n"

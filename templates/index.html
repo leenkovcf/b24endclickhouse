@@ -763,7 +763,7 @@ async function loadEntityFilters(entity) {
     // Wire auto-save + stage reload on funnel change
     addAutoSave('funnelsList', onFunnelChange);
     document.getElementById('funnelsGroup').style.display = 'block';
-  } else if (entity === 'crm_deal') {
+  } else if (['crm_deal','crm_deal_uf','crm_deal_stage_history','crm_deal_product_row'].includes(entity)) {
     // No custom funnels — load stages for the default pipeline (id=0)
     const stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
     if (stages.length) {
@@ -807,7 +807,10 @@ async function onFunnelChange() {
 }
 
 async function loadStages(entity, categoryIds, restoreState = false) {
-  const prev   = new Set(getCheckedValues('stagesList'));
+  // Capture full state (both checked AND unchecked) before re-render
+  const prevState = {};
+  document.querySelectorAll('#stagesList input').forEach(cb => { prevState[cb.value] = cb.checked; });
+
   const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
   const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
   if (!stages.length) { document.getElementById('stagesGroup').style.display = 'none'; return; }
@@ -815,7 +818,10 @@ async function loadStages(entity, categoryIds, restoreState = false) {
   if (restoreState) {
     restoreCheckboxState('stagesList');
   } else {
-    document.querySelectorAll('#stagesList input').forEach(cb => { if (prev.has(cb.value)) cb.checked = true; });
+    // Restore known states; new stages (added funnel) stay checked by default
+    document.querySelectorAll('#stagesList input').forEach(cb => {
+      if (cb.value in prevState) cb.checked = prevState[cb.value];
+    });
   }
   addAutoSave('stagesList', null);
   document.getElementById('stagesGroup').style.display = 'block';
@@ -1182,7 +1188,7 @@ async function loadSchedFilters(entity) {
     document.querySelectorAll('#sFunnelsList input').forEach(cb =>
       cb.addEventListener('change', onSchedFunnelChange));
     document.getElementById('sFunnelsGroup').style.display = 'block';
-  } else if (entity === 'crm_deal') {
+  } else if (['crm_deal','crm_deal_uf','crm_deal_stage_history','crm_deal_product_row'].includes(entity)) {
     const stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
     if (stages.length) {
       renderCheckboxes('sStagesList', stages, null);
@@ -1206,10 +1212,16 @@ async function loadSchedFilters(entity) {
 }
 
 async function loadSchedStages(entity, categoryIds) {
+  const prevState = {};
+  document.querySelectorAll('#sStagesList input').forEach(cb => { prevState[cb.value] = cb.checked; });
+
   const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
   const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
   if (!stages.length) { document.getElementById('sStagesGroup').style.display = 'none'; return; }
   renderStagesGrouped('sStagesList', stages, getFunnelNameMap('sFunnelsList'), null);
+  document.querySelectorAll('#sStagesList input').forEach(cb => {
+    if (cb.value in prevState) cb.checked = prevState[cb.value];
+  });
   document.getElementById('sStagesGroup').style.display = 'block';
 }
 
