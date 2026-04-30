@@ -37,10 +37,10 @@ ENTITIES = {
         {"code": "crm_lead_uf",            "name": "Пользовательские поля лидов",      "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_lead_status_history","name": "История статусов лидов",           "date_fields": []},
         {"code": "crm_lead_product_row",   "name": "Товары в лидах",                   "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
-        {"code": "crm_deal",               "name": "Сделки",                           "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
-        {"code": "crm_deal_uf",            "name": "Пользовательские поля сделок",     "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
+        {"code": "crm_deal",               "name": "Сделки",                           "date_fields": ["CLOSEDATE", "DATE_CREATE", "DATE_MODIFY"]},
+        {"code": "crm_deal_uf",            "name": "Пользовательские поля сделок",     "date_fields": ["CLOSEDATE", "DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_deal_stage_history", "name": "История статусов сделок",          "date_fields": []},
-        {"code": "crm_deal_product_row",   "name": "Товары в сделках",                 "date_fields": ["DATE_CREATE", "DATE_MODIFY", "CLOSEDATE"]},
+        {"code": "crm_deal_product_row",   "name": "Товары в сделках",                 "date_fields": ["DEAL_CLOSEDATE", "DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_company",            "name": "Компании",                         "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_company_uf",         "name": "Пользовательские поля компаний",   "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
         {"code": "crm_contact",            "name": "Контакты",                         "date_fields": ["DATE_CREATE", "DATE_MODIFY"]},
@@ -98,6 +98,7 @@ DATE_FIELD_LABELS = {
     "DATE_CREATE":    "Дата создания",
     "DATE_MODIFY":    "Дата изменения",
     "CLOSEDATE":      "Дата закрытия",
+    "DEAL_CLOSEDATE": "Дата закрытия сделки",
     "CREATED_DATE":   "Дата создания",
     "CHANGED_DATE":   "Дата изменения",
     "DEADLINE":       "Дедлайн",
@@ -159,7 +160,7 @@ def fetch_from_bitrix(portal: str, bi_key: str, table: str,
         payload["limit"] = limit
     logger.info("BI request table=%s filters=%s fields=%s",
                 table, json.dumps(payload.get("dimensionsFilters")), fields)
-    resp = requests.post(url, params={"table": table}, json=payload, timeout=90)
+    resp = requests.post(url, params={"table": table}, json=payload, timeout=300)
     resp.raise_for_status()
     raw = resp.json()
     if isinstance(raw, dict):
@@ -736,6 +737,81 @@ async def api_export_stream(data: dict):
         if fields:
             fields_preview = ", ".join(fields[:8]) + ("..." if len(fields) > 8 else "")
             yield f"data: {json.dumps({'status':'info','message':f'Поля ({len(fields)}): {fields_preview}'})}\n\n"
+
+        # ── Товары в сделках по дате закрытия: 2 запроса в день ──────────────
+        # Шаг 1 — ID сделок из crm_deal с CLOSEDATE = day (с учётом воронок/стадий)
+        # Шаг 2 — товары из crm_deal_product_row с DEAL_ID IN [полученные ID]
+        if entity == "crm_deal_product_row" and date_field == "DEAL_CLOSEDATE" and do_daily:
+            current = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt  = datetime.strptime(end_date,   "%Y-%m-%d")
+            total   = 0
+            while current <= end_dt:
+                day = current.strftime("%Y-%m-%d")
+                try:
+                    _ids_task = asyncio.ensure_future(
+                        asyncio.to_thread(fetch_from_bitrix, portal, bi_key, "crm_deal",
+                                          "CLOSEDATE", day, day, dimensions_filters, ["ID"]))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_ids_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'Получение сделок за {fmtday(day)}...'})}\n\n"
+                    deal_raw = _ids_task.result()
+
+                    deal_ids = []
+                    if len(deal_raw) > 1:
+                        hdr    = deal_raw[0]
+                        id_col = hdr.index("ID") if "ID" in hdr else 0
+                        deal_ids = [str(r[id_col]) for r in deal_raw[1:]
+                                    if id_col < len(r) and r[id_col] is not None]
+
+                    if not deal_ids:
+                        yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'ok'})}\n\n"
+                        current += timedelta(days=1)
+                        continue
+
+                    id_filter = {"fieldName": "DEAL_ID", "values": deal_ids,
+                                 "type": "INCLUDE", "operator": "IN_LIST"}
+                    _task = asyncio.ensure_future(
+                        asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
+                                          None, None, None, [id_filter], fields))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'Загрузка товаров за {fmtday(day)}...'})}\n\n"
+                    raw = _task.result()
+
+                    # Диагностика: сколько сделок без товаров
+                    if len(raw) > 1:
+                        pr_hdr = raw[0]
+                        did_col = pr_hdr.index("DEAL_ID") if "DEAL_ID" in pr_hdr else None
+                        if did_col is not None:
+                            found_ids = {str(r[did_col]) for r in raw[1:]
+                                         if did_col < len(r) and r[did_col] is not None}
+                            no_products = len(set(deal_ids) - found_ids)
+                            if no_products:
+                                yield f"data: {json.dumps({'status':'info','message':f'{fmtday(day)}: сделок {len(deal_ids)}, без товаров {no_products}'})}\n\n"
+
+                    _ch_task = asyncio.ensure_future(
+                        asyncio.to_thread(push_to_clickhouse, config, entity, raw))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_ch_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'Запись в ClickHouse за {fmtday(day)}...'})}\n\n"
+                    rows  = _ch_task.result()
+                    total += rows
+                    yield f"data: {json.dumps({'date': day, 'rows': rows, 'total': total, 'status': 'ok'})}\n\n"
+                except Exception as exc:
+                    yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'error', 'error': str(exc)})}\n\n"
+                current += timedelta(days=1)
+            yield f"data: {json.dumps({'status': 'done', 'total': total})}\n\n"
+            return
+        # ── Конец специального блока ───────────────────────────────────────────
 
         if not do_daily:
             try:
