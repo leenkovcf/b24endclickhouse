@@ -168,6 +168,50 @@ def _rest(webhook: str, method: str, params: dict = None) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def _rest_post(webhook: str, method: str, data: dict = None) -> dict:
+    """Call Bitrix24 REST API via POST (used for batch)."""
+    url = f"{webhook.rstrip('/')}/{method}"
+    resp = requests.post(url, json=data or {}, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+def _uf_labels_via_batch(webhook: str, list_method: str) -> dict:
+    """Fetch UF field labels using batch API: list to get IDs, then get each label."""
+    get_method = list_method.replace(".list", ".get")
+
+    # Step 1: collect all (ID, FIELD_NAME) pairs with pagination
+    start = 0
+    all_fields: list = []
+    while True:
+        data  = _rest(webhook, list_method, {"start": start})
+        batch = data.get("result", [])
+        all_fields.extend([(uf["ID"], uf.get("FIELD_NAME", "")) for uf in batch])
+        next_start = data.get("next")
+        if not next_start or not batch:
+            break
+        start = next_start
+
+    if not all_fields:
+        return {}
+
+    # Step 2: batch-fetch labels (max 50 per Bitrix24 batch request)
+    labels: dict = {}
+    for i in range(0, len(all_fields), 50):
+        chunk    = all_fields[i:i + 50]
+        commands = {f"f{j}": f"{get_method}?id={fid}" for j, (fid, _) in enumerate(chunk)}
+        try:
+            resp    = _rest_post(webhook, "batch", {"halt": 0, "cmd": commands})
+            results = resp.get("result", {}).get("result", {})
+            for j, (_, fname) in enumerate(chunk):
+                field_data = results.get(f"f{j}") or {}
+                label = _label_from_uf(field_data)
+                if fname and label and label != fname:
+                    labels[fname] = label
+        except Exception as be:
+            logger.warning("batch uf labels chunk %d: %s", i, be)
+
+    return labels
+
 # ---------------------------------------------------------------------------
 # ClickHouse helpers
 # ---------------------------------------------------------------------------
@@ -478,13 +522,15 @@ _UF_METHODS: dict = {
 
 def _label_from_uf(uf: dict) -> str:
     """Extract the best available Russian label from a userfield record."""
-    for key in ("EDIT_FORM_LABEL", "LIST_COLUMN_LABEL"):
+    for key in ("EDIT_FORM_LABEL", "LIST_COLUMN_LABEL", "LIST_FILTER_LABEL"):
         lbl = uf.get(key)
+        if isinstance(lbl, str) and lbl.strip():
+            return lbl.strip()
         if isinstance(lbl, dict):
-            # Try Russian first, then any available language
-            text = lbl.get("ru") or lbl.get("en") or next(iter(lbl.values()), "")
-            if text:
-                return text
+            # {"ru": "Название"} or {"ru": null, "en": "Name"}
+            text = lbl.get("ru") or lbl.get("en") or next((v for v in lbl.values() if v), "")
+            if text and str(text).strip():
+                return str(text).strip()
     return ""
 
 @app.get("/api/field-labels")
@@ -505,18 +551,15 @@ async def api_field_labels(entity: str):
                 if isinstance(v, dict) and v.get("title") and v["title"] != k:
                     labels[k] = v["title"]
 
-            # For _uf entities: override/extend with proper UF labels from userfield.list
+            # For _uf entities: batch-fetch proper labels via userfield.get per field
             if entity in _UF_METHODS:
                 try:
-                    uf_data = _rest(webhook, _UF_METHODS[entity],
-                                    {"order[FIELD_NAME]": "ASC", "start": -1})
-                    for uf in uf_data.get("result", []):
-                        code  = uf.get("FIELD_NAME", "")
-                        label = _label_from_uf(uf)
-                        if code and label and label != code:
-                            labels[code] = label
+                    uf_labels = await asyncio.to_thread(
+                        _uf_labels_via_batch, webhook, _UF_METHODS[entity]
+                    )
+                    labels.update(uf_labels)
                 except Exception as uf_exc:
-                    logger.warning("userfield.list for %s: %s", entity, uf_exc)
+                    logger.warning("batch uf labels for %s: %s", entity, uf_exc)
 
         elif entity.startswith("crm_dynamic_items_") and not entity.endswith("_product_row"):
             eid  = entity.replace("crm_dynamic_items_", "").split("_")[0]
@@ -537,6 +580,60 @@ async def api_field_labels(entity: str):
     except Exception as exc:
         logger.warning("field-labels: %s", exc)
         return {}
+
+@app.get("/api/debug-userfields")
+async def api_debug_userfields(entity: str = "crm_deal_uf"):
+    """Return raw Bitrix24 response for userfield.list — for diagnostics only."""
+    config  = load_config()
+    webhook = config["bitrix"].get("rest_webhook", "").strip().rstrip("/")
+    if not webhook:
+        return {"error": "webhook not configured"}
+    method = _UF_METHODS.get(entity)
+    if not method:
+        return {"error": f"no userfield method for {entity}"}
+    try:
+        data   = _rest(webhook, method, {"start": 0})
+        result = data.get("result", [])
+        sample = result[:3] if result else []
+
+        # Also check crm.deal.fields for UF titles
+        base_method = _ENTITY_FIELDS_REST.get(entity, "")
+        uf_from_fields: dict = {}
+        if base_method:
+            fd = _rest(webhook, base_method)
+            uf_from_fields = {
+                k: v.get("title")
+                for k, v in fd.get("result", {}).items()
+                if k.startswith("UF_") and isinstance(v, dict)
+            }
+
+        # Try userfield.get for first field to see full structure
+        first_get = {}
+        if result:
+            first_id = result[0].get("ID")
+            try:
+                first_get = _rest(webhook, method.replace(".list", ".get"), {"id": first_id})
+            except Exception:
+                pass
+
+        return {
+            "userfield_list": {
+                "method": method,
+                "total": data.get("total"),
+                "first_3_labels": [
+                    {
+                        "FIELD_NAME": uf.get("FIELD_NAME"),
+                        "EDIT_FORM_LABEL": uf.get("EDIT_FORM_LABEL"),
+                        "LIST_COLUMN_LABEL": uf.get("LIST_COLUMN_LABEL"),
+                    }
+                    for uf in sample
+                ],
+            },
+            "crm_entity_fields_uf_titles": dict(list(uf_from_fields.items())[:10]),
+            "userfield_get_first": first_get,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
 
 @app.get("/api/crm-stages")
 async def api_crm_stages(entity: str, category_ids: str = ""):
