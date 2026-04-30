@@ -153,13 +153,13 @@ def fetch_from_bitrix(portal: str, bi_key: str, table: str,
         payload["configParams"] = {"timeFilterColumn": date_field}
     if dimensions_filters:
         payload["dimensionsFilters"] = [[f] for f in dimensions_filters]
-    logger.info("BI request table=%s filters=%s fields=%s",
-                table, json.dumps(payload.get("dimensionsFilters")), fields)
     if fields:
         payload["fields"] = [{"name": f} for f in fields]
     if limit:
         payload["limit"] = limit
-    resp = requests.post(url, params={"table": table}, json=payload, timeout=300)
+    logger.info("BI request table=%s filters=%s fields=%s",
+                table, json.dumps(payload.get("dimensionsFilters")), fields)
+    resp = requests.post(url, params={"table": table}, json=payload, timeout=90)
     resp.raise_for_status()
     raw = resp.json()
     if isinstance(raw, dict):
@@ -752,7 +752,15 @@ async def api_export_stream(data: dict):
                 raw  = _task.result()
                 bi_n = len(raw) - 1 if isinstance(raw, list) and raw else 0
                 yield f"data: {json.dumps({'status':'info','message':f'BI connector вернул: {bi_n} строк'})}\n\n"
-                rows = await asyncio.to_thread(push_to_clickhouse, config, entity, raw)
+                _ch_task = asyncio.ensure_future(
+                    asyncio.to_thread(push_to_clickhouse, config, entity, raw))
+                while True:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_ch_task), timeout=20.0)
+                        break
+                    except asyncio.TimeoutError:
+                        yield f"data: {json.dumps({'status': 'info', 'message': 'Запись в ClickHouse...'})}\n\n"
+                rows = _ch_task.result()
                 yield f"data: {json.dumps({'status': 'done', 'rows': rows, 'total': rows})}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
@@ -774,7 +782,15 @@ async def api_export_stream(data: dict):
                     except asyncio.TimeoutError:
                         yield f"data: {json.dumps({'status': 'info', 'message': f'Ожидание ответа за {fmtday(day)}...'})}\n\n"
                 raw  = _task.result()
-                rows = await asyncio.to_thread(push_to_clickhouse, config, entity, raw)
+                _ch_task = asyncio.ensure_future(
+                    asyncio.to_thread(push_to_clickhouse, config, entity, raw))
+                while True:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_ch_task), timeout=20.0)
+                        break
+                    except asyncio.TimeoutError:
+                        yield f"data: {json.dumps({'status': 'info', 'message': f'Запись в ClickHouse за {fmtday(day)}...'})}\n\n"
+                rows = _ch_task.result()
                 total += rows
                 yield f"data: {json.dumps({'date': day, 'rows': rows, 'total': total, 'status': 'ok'})}\n\n"
             except Exception as exc:
