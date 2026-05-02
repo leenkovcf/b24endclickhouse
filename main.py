@@ -510,6 +510,15 @@ async def api_entity_fields(entity: str):
 # Entities derived from crm_deal that share its funnel/stage structure
 _DEAL_VARIANTS = {"crm_deal", "crm_deal_uf", "crm_deal_stage_history", "crm_deal_product_row"}
 
+# These BI tables don't expose CATEGORY_ID/STAGE_ID as filter dimensions →
+# must pivot via crm_deal first to get matching DEAL_IDs
+_UF_DEAL_VARIANTS = {"crm_deal_uf", "crm_deal_stage_history"}
+
+def _needs_deal_id_pivot(entity: str, filters) -> bool:
+    if entity not in _UF_DEAL_VARIANTS or not filters:
+        return False
+    return any(f.get("fieldName") in ("CATEGORY_ID", "STAGE_ID") for f in filters)
+
 @app.get("/api/crm-funnels")
 async def api_crm_funnels(entity: str = "crm_deal"):
     """Return pipeline categories for deals or smart processes."""
@@ -812,6 +821,72 @@ async def api_export_stream(data: dict):
             yield f"data: {json.dumps({'status': 'done', 'total': total})}\n\n"
             return
         # ── Конец специального блока ───────────────────────────────────────────
+
+        # ── crm_deal_uf / crm_deal_stage_history + фильтры воронок/стадий ─────
+        # BI-коннектор не принимает CATEGORY_ID/STAGE_ID для этих таблиц.
+        # Шаг 1 — ID сделок из crm_deal с нужными фильтрами.
+        # Шаг 2 — данные из entity, отфильтрованные по DEAL_ID IN [...].
+        if _needs_deal_id_pivot(entity, dimensions_filters) and do_daily:
+            current = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt  = datetime.strptime(end_date,   "%Y-%m-%d")
+            total   = 0
+            while current <= end_dt:
+                day = current.strftime("%Y-%m-%d")
+                try:
+                    _ids_task = asyncio.ensure_future(
+                        asyncio.to_thread(fetch_from_bitrix, portal, bi_key, "crm_deal",
+                                          date_field, day, day, dimensions_filters, ["ID"]))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_ids_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'ID сделок за {fmtday(day)}...'})}\n\n"
+                    deal_raw = _ids_task.result()
+
+                    deal_ids = []
+                    if len(deal_raw) > 1:
+                        hdr    = deal_raw[0]
+                        id_col = hdr.index("ID") if "ID" in hdr else 0
+                        deal_ids = [str(r[id_col]) for r in deal_raw[1:]
+                                    if id_col < len(r) and r[id_col] is not None]
+
+                    if not deal_ids:
+                        yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'ok'})}\n\n"
+                        current += timedelta(days=1)
+                        continue
+
+                    yield f"data: {json.dumps({'status':'info','message':f'{fmtday(day)}: сделок {len(deal_ids)}, загрузка {entity}...'})}\n\n"
+                    id_filter = {"fieldName": "DEAL_ID", "values": deal_ids,
+                                 "type": "INCLUDE", "operator": "IN_LIST"}
+                    _task = asyncio.ensure_future(
+                        asyncio.to_thread(fetch_from_bitrix, portal, bi_key, entity,
+                                          None, None, None, [id_filter], fields))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'Загрузка {entity} за {fmtday(day)}...'})}\n\n"
+                    raw = _task.result()
+
+                    _ch_task = asyncio.ensure_future(
+                        asyncio.to_thread(push_to_clickhouse, config, entity, raw))
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_ch_task), timeout=20.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield f"data: {json.dumps({'status':'info','message':f'Запись в ClickHouse за {fmtday(day)}...'})}\n\n"
+                    rows  = _ch_task.result()
+                    total += rows
+                    yield f"data: {json.dumps({'date': day, 'rows': rows, 'total': total, 'status': 'ok'})}\n\n"
+                except Exception as exc:
+                    yield f"data: {json.dumps({'date': day, 'rows': 0, 'total': total, 'status': 'error', 'error': str(exc)})}\n\n"
+                current += timedelta(days=1)
+            yield f"data: {json.dumps({'status': 'done', 'total': total})}\n\n"
+            return
+        # ── Конец блока двухшагового pivot ────────────────────────────────────
 
         if not do_daily:
             try:

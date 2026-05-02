@@ -119,6 +119,11 @@
         </div>
 
         <div id="fieldsGroup" style="display:none">
+          <div class="fields-search-row">
+            <input type="text" id="fieldsSearch" class="fields-search-input"
+                   placeholder="Поиск по полям..." oninput="filterFields(this.value)">
+            <span id="fieldsCount" class="fields-count"></span>
+          </div>
           <div id="fieldsRuGroup" style="display:none">
             <label class="form-label">
               Поля (русское название)
@@ -326,6 +331,11 @@
           </div>
         </div>
         <div id="sFieldsGroup" style="display:none">
+          <div class="fields-search-row">
+            <input type="text" id="sFieldsSearch" class="fields-search-input"
+                   placeholder="Поиск по полям..." oninput="filterSchedFields(this.value)">
+            <span id="sFieldsCount" class="fields-count"></span>
+          </div>
           <div id="sFieldsRuGroup" style="display:none">
             <label class="form-label">Поля (русское название)
               <span class="sel-btns">
@@ -480,11 +490,17 @@ async function boot() {
     document.getElementById('schedDaysBack').value = daysMap[v('schedFreq')] || 1;
   });
 
-  // Default dates (first day of current month → today)
+  // Default dates: restore from localStorage, or fallback to first of month → today
   const today = new Date();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  document.getElementById('exportStartDate').value = fmt(firstDay);
-  document.getElementById('exportEndDate').value   = fmt(today);
+  document.getElementById('exportStartDate').value = LS.get('bi_start_date') || fmt(firstDay);
+  document.getElementById('exportEndDate').value   = LS.get('bi_end_date')   || fmt(today);
+
+  // Save dates on change
+  document.getElementById('exportStartDate').addEventListener('change', () =>
+    LS.set('bi_start_date', v('exportStartDate')));
+  document.getElementById('exportEndDate').addEventListener('change', () =>
+    LS.set('bi_end_date', v('exportEndDate')));
 
   await loadSettings();
   await loadSchedule();
@@ -723,6 +739,10 @@ async function loadEntityFilters(entity) {
   sec.style.display = 'block';
   loading.style.display = 'inline';
 
+  // Reset search input
+  const searchEl = document.getElementById('fieldsSearch');
+  if (searchEl) searchEl.value = '';
+
   const [fieldsRes, funnelsRes, labelsRes] = await Promise.all([
     fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
     fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
@@ -749,7 +769,8 @@ async function loadEntityFilters(entity) {
 
     restoreCheckboxState('fieldsList');
     syncFieldsToRu();
-    addAutoSave('fieldsList', null);
+    addAutoSave('fieldsList', updateFieldsCount);
+    updateFieldsCount();
     document.getElementById('fieldsGroup').style.display = 'block';
   }
 
@@ -893,9 +914,26 @@ function checkAll(containerId, state) {
 function checkAllFields(state) {
   document.querySelectorAll('#fieldsList input, #fieldsRuList input').forEach(cb => cb.checked = state);
   saveCheckboxState('fieldsList');
+  updateFieldsCount();
 }
 
-// Wire: Ru checkbox click → update Orig + dispatch change (triggers auto-save)
+function filterFields(query) {
+  const q = query.toLowerCase().trim();
+  ['fieldsRuList', 'fieldsList'].forEach(id => {
+    document.querySelectorAll(`#${id} .checkbox-item`).forEach(lbl => {
+      lbl.style.display = (!q || lbl.textContent.toLowerCase().includes(q)) ? '' : 'none';
+    });
+  });
+}
+
+function updateFieldsCount() {
+  const total = getAllValues('fieldsList').length;
+  const chk   = getCheckedValues('fieldsList').length;
+  const el    = document.getElementById('fieldsCount');
+  if (el) el.textContent = total ? `Выбрано: ${chk} из ${total}` : '';
+}
+
+// Wire: Ru checkbox click → update Orig + dispatch change (triggers auto-save + count update)
 function wireSyncRuToOrig() {
   document.querySelectorAll('#fieldsRuList input').forEach(cb => {
     cb.addEventListener('change', () => {
@@ -1160,6 +1198,10 @@ async function loadSchedFilters(entity) {
   sec.style.display = 'block';
   loading.style.display = 'inline';
 
+  // Reset search input
+  const sSearchEl = document.getElementById('sFieldsSearch');
+  if (sSearchEl) sSearchEl.value = '';
+
   const [fieldsRes, funnelsRes, labelsRes] = await Promise.all([
     fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
     fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
@@ -1179,6 +1221,7 @@ async function loadSchedFilters(entity) {
       document.getElementById('sFieldsRuGroup').style.display = 'block';
       document.getElementById('sFieldsOrigTitle').textContent = 'Оригинальные названия';
     }
+    updateSchedFieldsCount();
     document.getElementById('sFieldsGroup').style.display = 'block';
   }
 
@@ -1233,6 +1276,23 @@ async function onSchedFunnelChange() {
 
 function checkAllSchedFields(state) {
   document.querySelectorAll('#sFieldsList input, #sFieldsRuList input').forEach(cb => cb.checked = state);
+  updateSchedFieldsCount();
+}
+
+function filterSchedFields(query) {
+  const q = query.toLowerCase().trim();
+  ['sFieldsRuList', 'sFieldsList'].forEach(id => {
+    document.querySelectorAll(`#${id} .checkbox-item`).forEach(lbl => {
+      lbl.style.display = (!q || lbl.textContent.toLowerCase().includes(q)) ? '' : 'none';
+    });
+  });
+}
+
+function updateSchedFieldsCount() {
+  const total = getAllValues('sFieldsList').length;
+  const chk   = getCheckedValues('sFieldsList').length;
+  const el    = document.getElementById('sFieldsCount');
+  if (el) el.textContent = total ? `Выбрано: ${chk} из ${total}` : '';
 }
 
 function wireSyncSchedRuToOrig() {
@@ -1290,6 +1350,7 @@ function restoreSchedFields(fields) {
   const set = new Set(fields);
   document.querySelectorAll('#sFieldsList input').forEach(cb => { cb.checked = set.has(cb.value); });
   syncSchedFieldsToRu();
+  updateSchedFieldsCount();
 }
 
 // ═══════════════════════════════════════════════════════════════

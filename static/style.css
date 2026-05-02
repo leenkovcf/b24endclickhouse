@@ -462,12 +462,44 @@ select.form-control {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
   gap: 1px;
-  max-height: 210px;
+  max-height: 280px;
   overflow-y: auto;
   border: 1.5px solid var(--border);
   border-radius: var(--r-sm);
   padding: 5px;
   background: #fff;
+}
+
+/* ── Fields search ──────────────────────────────────────────────── */
+.fields-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.fields-search-input {
+  flex: 1;
+  padding: 7px 11px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-1);
+  background: #fff;
+  transition: border-color .15s, box-shadow .15s;
+  outline: none;
+}
+.fields-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-lt);
+}
+.fields-search-input::placeholder { color: var(--text-3); }
+.fields-count {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .checkbox-item {
   display: flex;
