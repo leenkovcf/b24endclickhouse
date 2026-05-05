@@ -122,9 +122,26 @@ SCHEDULE_LABELS = {
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            cfg = json.load(f)
+        # Non-destructive in-memory migration. Disk is NOT touched until explicit save.
+        cfg.setdefault("ozon", {})
+        if not isinstance(cfg["ozon"].get("accounts"), list):
+            legacy = cfg.get("ozon", {})
+            if legacy.get("client_id") or legacy.get("api_key"):
+                cfg["ozon"] = {"accounts": [{
+                    "name":           legacy.get("name") or "Магазин",
+                    "client_id":      legacy.get("client_id", ""),
+                    "api_key":        legacy.get("api_key", ""),
+                    "perf_client_id": legacy.get("perf_client_id", ""),
+                    "perf_secret":    legacy.get("perf_secret", ""),
+                }]}
+            else:
+                cfg["ozon"] = {"accounts": []}
+        cfg.setdefault("saved_configs", [])
+        return cfg
     return {
         "bitrix":     {"portal": "", "bi_key": ""},
+        "ozon":       {"accounts": []},
         "clickhouse": {"host": "", "port": 8443, "database": "default", "username": "admin", "password": ""},
         "schedule":   {"enabled": False, "frequency": "daily", "time_msk": "00:01", "configs": [], "days_back": 1},
         "saved_configs": [],
@@ -144,6 +161,14 @@ def _entity_display_name(code: str) -> str:
         for e in items:
             if e["code"] == code:
                 return e["name"]
+    # OZON_ENTITIES is defined later in the file; access via globals() to avoid
+    # forward-reference issues at import time.
+    ozon_cat = globals().get("OZON_ENTITIES")
+    if isinstance(ozon_cat, dict):
+        for items in ozon_cat.values():
+            for e in items:
+                if e["code"] == code:
+                    return e["name"]
     try:
         for ce in load_config().get("custom_entities", []):
             if ce.get("code") == code:
@@ -173,10 +198,17 @@ def _record_history(entry: dict) -> None:
     next_id = (items[0]["id"] + 1) if items and isinstance(items[0].get("id"), int) else 1
     entry = dict(entry)
     entry["id"] = next_id
+    entry.setdefault("provider", "bitrix")
     entry.setdefault("entity_name", _entity_display_name(entry.get("entity", "")))
     items.insert(0, entry)
     _save_history(items)
 
+# ===========================================================================
+# ============================  BITRIX24 PROVIDER  ==========================
+# ===========================================================================
+# Everything below until the OZON PROVIDER marker is Bitrix-specific.
+# When adding multi-provider features, prefer to add new endpoints/functions
+# alongside without touching the existing ones (backward compatibility).
 # ---------------------------------------------------------------------------
 # Bitrix24 helpers
 # ---------------------------------------------------------------------------
@@ -413,7 +445,8 @@ def push_to_clickhouse(config: dict, table_name: str, raw: list) -> int:
 # Background export
 # ---------------------------------------------------------------------------
 def _do_export(data: dict, source: str = "manual_form",
-               config_name: Optional[str] = None) -> None:
+               config_name: Optional[str] = None,
+               provider: str = "bitrix") -> None:
     global export_status
     export_status = {"running": True, "rows": 0, "error": None, "last_run": None}
     config  = load_config()
@@ -421,17 +454,25 @@ def _do_export(data: dict, source: str = "manual_form",
     rows    = 0
     error   = None
     try:
-        raw_pair = fetch_from_bitrix_safe(
-            config["bitrix"]["portal"],
-            config["bitrix"]["bi_key"],
-            data["entity"],
-            data.get("date_field")         or None,
-            data.get("start_date")         or None,
-            data.get("end_date")           or None,
-            data.get("dimensions_filters") or None,
-            data.get("fields")             or None,
-        )
-        raw, _removed = raw_pair
+        if provider == "ozon":
+            account_name = data.get("ozon_account") or ""
+            account = _ozon_account_by_name(config, account_name)
+            if not account:
+                raise Exception(f"Аккаунт Ozon '{account_name}' не найден")
+            raw = _ozon_fetch_dispatch(account, data["entity"],
+                                       data.get("start_date") or "",
+                                       data.get("end_date") or "")
+        else:
+            raw, _removed = fetch_from_bitrix_safe(
+                config["bitrix"]["portal"],
+                config["bitrix"]["bi_key"],
+                data["entity"],
+                data.get("date_field")         or None,
+                data.get("start_date")         or None,
+                data.get("end_date")           or None,
+                data.get("dimensions_filters") or None,
+                data.get("fields")             or None,
+            )
         rows = push_to_clickhouse(config, data["entity"], raw)
         export_status = {"running": False, "rows": rows, "error": None,
                          "last_run": datetime.now().strftime("%d.%m.%Y %H:%M")}
@@ -447,6 +488,7 @@ def _do_export(data: dict, source: str = "manual_form",
             "started_at":         started.isoformat(timespec="seconds"),
             "finished_at":        finished.isoformat(timespec="seconds"),
             "duration_sec":       int((finished - started).total_seconds()),
+            "provider":           provider,
             "source":             source,
             "config_name":        config_name,
             "entity":             data.get("entity", ""),
@@ -485,7 +527,9 @@ def _run_scheduled() -> None:
                 "end_date":           end,
                 "dimensions_filters": sc.get("dimensions_filters") or None,
                 "fields":             sc.get("fields") or None,
-            }, source="schedule", config_name=name)
+                "ozon_account":       sc.get("ozon_account") or "",
+            }, source="schedule", config_name=name,
+               provider=sc.get("provider") or "bitrix")
         return
 
     # Backward compatibility: old single-entity schedule
@@ -497,7 +541,7 @@ def _run_scheduled() -> None:
             "end_date":           end,
             "dimensions_filters": sch.get("dimensions_filters") or None,
             "fields":             sch.get("fields") or None,
-        }, source="schedule")
+        }, source="schedule", provider="bitrix")
 
 def _apply_schedule(config: dict) -> None:
     if scheduler.get_job("export_job"):
@@ -545,6 +589,8 @@ async def api_save_settings(data: dict):
     config = load_config()
     if "bitrix" in data:
         config["bitrix"].update(data["bitrix"])
+    # Note: Ozon accounts are managed via /api/ozon/accounts (multi-account UI).
+    # We intentionally don't accept ozon credentials through generic settings save.
     if "clickhouse" in data:
         config["clickhouse"].update(data["clickhouse"])
     if "custom_entities" in data:
@@ -1097,7 +1143,8 @@ def _sse(ev: dict) -> str:
 async def _iter_with_history(inner, *, source: str, entity: str,
                              date_field: str, start_date: str, end_date: str,
                              dimensions_filters, fields,
-                             config_name: Optional[str] = None):
+                             config_name: Optional[str] = None,
+                             provider: str = "bitrix"):
     """Pass-through async generator that records a history entry on completion."""
     started = datetime.now()
     rows    = 0
@@ -1120,6 +1167,7 @@ async def _iter_with_history(inner, *, source: str, entity: str,
             "started_at":         started.isoformat(timespec="seconds"),
             "finished_at":        finished.isoformat(timespec="seconds"),
             "duration_sec":       int((finished - started).total_seconds()),
+            "provider":           provider,
             "source":             source,
             "config_name":        config_name,
             "entity":             entity or "",
@@ -1143,6 +1191,7 @@ async def api_export_stream(data: dict):
     end_date           = data.get("end_date", "")
     dimensions_filters = data.get("dimensions_filters") or None
     fields             = data.get("fields") or None
+    provider           = data.get("provider") or "bitrix"
 
     async def gen():
         inner = _export_event_iter(config, entity, date_field,
@@ -1153,6 +1202,7 @@ async def api_export_stream(data: dict):
             source="manual_form", entity=entity, date_field=date_field,
             start_date=start_date, end_date=end_date,
             dimensions_filters=dimensions_filters, fields=fields,
+            provider=provider,
         ):
             yield _sse(ev)
 
@@ -1190,16 +1240,22 @@ async def api_manual_export_stream(data: dict):
                         "job_name": name, "entity": entity,
                         "total_jobs": len(jobs)})
             job_total = 0
+            job_provider = job.get("provider") or "bitrix"
+            ozon_account = job.get("ozon_account") or ""
             try:
-                inner = _export_event_iter(config, entity, df,
-                                           start_date, end_date,
-                                           dims, flds)
+                if job_provider == "ozon":
+                    inner = _ozon_export_event_iter(config, ozon_account, entity,
+                                                    df, start_date, end_date)
+                else:
+                    inner = _export_event_iter(config, entity, df,
+                                               start_date, end_date,
+                                               dims, flds)
                 async for ev in _iter_with_history(
                     inner,
                     source="manual_batch", entity=entity, date_field=df,
                     start_date=start_date, end_date=end_date,
                     dimensions_filters=dims, fields=flds,
-                    config_name=name,
+                    config_name=name, provider=job_provider,
                 ):
                     ev["job_idx"]  = idx
                     ev["job_name"] = name
@@ -1544,6 +1600,7 @@ async def api_apply_updates(data: dict):
             "started_at":         started.isoformat(timespec="seconds"),
             "finished_at":        finished.isoformat(timespec="seconds"),
             "duration_sec":       int((finished - started).total_seconds()),
+            "provider":           data.get("provider") or "bitrix",
             "source":             "reconciliation",
             "config_name":        data.get("config_name"),
             "entity":             entity,
@@ -1564,6 +1621,7 @@ async def api_apply_updates(data: dict):
             "started_at":         started.isoformat(timespec="seconds"),
             "finished_at":        finished.isoformat(timespec="seconds"),
             "duration_sec":       int((finished - started).total_seconds()),
+            "provider":           data.get("provider") or "bitrix",
             "source":             "reconciliation",
             "config_name":        data.get("config_name"),
             "entity":             entity,
@@ -1582,8 +1640,11 @@ async def api_apply_updates(data: dict):
 # Saved configurations (named export presets)
 # ---------------------------------------------------------------------------
 def _normalize_saved_config(data: dict, name: str) -> dict:
+    provider = (data.get("provider") or "bitrix").strip() or "bitrix"
     return {
         "name":               name,
+        "provider":           provider,
+        "ozon_account":       (data.get("ozon_account") or "") if provider == "ozon" else "",
         "entity":             data.get("entity", ""),
         "date_field":         data.get("date_field", "") or "",
         "dimensions_filters": data.get("dimensions_filters") or [],
@@ -1592,7 +1653,12 @@ def _normalize_saved_config(data: dict, name: str) -> dict:
 
 @app.get("/api/saved-configs")
 async def api_get_saved_configs():
-    return load_config().get("saved_configs", [])
+    items = load_config().get("saved_configs", [])
+    # Backfill provider="bitrix" for legacy entries that pre-date provider support.
+    for it in items:
+        if isinstance(it, dict) and not it.get("provider"):
+            it["provider"] = "bitrix"
+    return items
 
 @app.post("/api/saved-configs")
 async def api_create_saved_config(data: dict):
@@ -1658,6 +1724,7 @@ async def api_get_history(limit: int = 200):
     # Enrich with display names server-side so the client doesn't need ENTITIES.
     for it in items:
         it["entity_name"] = _entity_display_name(it.get("entity", ""))
+        it.setdefault("provider", "bitrix")
     return items
 
 @app.delete("/api/history")
@@ -1721,6 +1788,681 @@ def on_startup():
 @app.on_event("shutdown")
 def on_shutdown():
     scheduler.shutdown(wait=False)
+
+# ===========================================================================
+# ===============================  OZON PROVIDER  ===========================
+# ===========================================================================
+OZON_API_BASE  = "https://api-seller.ozon.ru"
+OZON_PERF_BASE = "https://api-performance.ozon.ru"
+
+OZON_ENTITIES = {
+    "Каталог": [
+        {"code": "ozon_product", "name": "Товары",            "date_fields": []},
+        {"code": "ozon_stock",   "name": "Остатки на складах", "date_fields": []},
+    ],
+    "Заказы и возвраты": [
+        {"code": "ozon_posting_fbs", "name": "Заказы FBS",         "date_fields": ["in_process_at"]},
+        {"code": "ozon_posting_fbo", "name": "Заказы FBO",         "date_fields": ["in_process_at"]},
+        {"code": "ozon_returns_fbs", "name": "Возвраты FBS",       "date_fields": []},
+        {"code": "ozon_returns_fbo", "name": "Возвраты FBO",       "date_fields": []},
+    ],
+    "Финансы и аналитика": [
+        {"code": "ozon_finance_transaction", "name": "Финансовые транзакции",  "date_fields": ["operation_date"]},
+        {"code": "ozon_analytics_data",      "name": "Аналитика товаров",       "date_fields": ["date"]},
+        {"code": "ozon_analytics_stocks",    "name": "Аналитика остатков",      "date_fields": []},
+    ],
+    "Реклама (Performance API)": [
+        {"code": "ozon_perf_campaigns",  "name": "Рекламные кампании",     "date_fields": []},
+        {"code": "ozon_perf_statistics", "name": "Статистика кампаний",    "date_fields": ["date"]},
+    ],
+}
+
+OZON_DATE_LABELS = {
+    "in_process_at":  "Дата приёмки",
+    "operation_date": "Дата операции",
+    "date":           "Дата",
+}
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+def _ozon_accounts_list(config: dict) -> list:
+    return ((config.get("ozon") or {}).get("accounts")) or []
+
+def _ozon_account_by_name(config: dict, name: str) -> Optional[dict]:
+    for a in _ozon_accounts_list(config):
+        if a.get("name") == name:
+            return a
+    return None
+
+def _ozon_iso(date_str: str, end_of_day: bool = False) -> Optional[str]:
+    """'2026-01-15' → '2026-01-15T00:00:00.000Z' (or 23:59:59.999Z)."""
+    if not date_str:
+        return None
+    suffix = "T23:59:59.999Z" if end_of_day else "T00:00:00.000Z"
+    return f"{date_str}{suffix}"
+
+def _ozon_seller_request(account: dict, method: str, path: str,
+                         body=None, params=None, timeout: int = 180) -> dict:
+    """Call Ozon Seller API. Raises with readable message on HTTP error."""
+    if not account.get("client_id") or not account.get("api_key"):
+        raise Exception("Не заполнены Client-Id или Api-Key аккаунта Ozon")
+    headers = {
+        "Client-Id":   str(account["client_id"]).strip(),
+        "Api-Key":     str(account["api_key"]).strip(),
+        "Content-Type": "application/json",
+    }
+    url = OZON_API_BASE + path
+    resp = requests.request(method, url, headers=headers, json=body,
+                            params=params, timeout=timeout)
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+            msg = err.get("message") or err.get("error") or json.dumps(err)[:300]
+        except Exception:
+            msg = resp.text[:300]
+        raise Exception(f"Ozon API {resp.status_code}: {msg}")
+    return resp.json()
+
+# Performance API token cache: {account_name: (token, expires_at)}
+_OZON_PERF_TOKENS: dict = {}
+
+def _ozon_perf_token(account: dict) -> str:
+    name = account.get("name", "")
+    cached = _OZON_PERF_TOKENS.get(name)
+    if cached and cached[1] > datetime.now() + timedelta(seconds=30):
+        return cached[0]
+    cid = (account.get("perf_client_id") or "").strip()
+    sec = (account.get("perf_secret") or "").strip()
+    if not cid or not sec:
+        raise Exception("Performance API ключи не заполнены для этого аккаунта")
+    resp = requests.post(
+        f"{OZON_PERF_BASE}/api/client/token",
+        json={"client_id": cid, "client_secret": sec, "grant_type": "client_credentials"},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise Exception(f"Performance auth failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    data  = resp.json()
+    token = data.get("access_token", "")
+    ttl   = int(data.get("expires_in") or 1800)
+    _OZON_PERF_TOKENS[name] = (token, datetime.now() + timedelta(seconds=ttl))
+    return token
+
+def _ozon_perf_request(account: dict, method: str, path: str,
+                       body=None, params=None, timeout: int = 180) -> dict:
+    token   = _ozon_perf_token(account)
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url     = OZON_PERF_BASE + path
+    resp    = requests.request(method, url, headers=headers, json=body,
+                               params=params, timeout=timeout)
+    if resp.status_code >= 400:
+        raise Exception(f"Performance API {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+# ── Entity fetchers ────────────────────────────────────────────────────────
+# Each returns BI-style raw: [headers, row, row, ...]. They yield progress
+# events via the wrapping iterator — actual paging/chunking happens here.
+
+def _ozon_fetch_product(account: dict) -> list:
+    headers = ["product_id", "offer_id", "name", "barcode", "category_id",
+               "marketing_price", "min_price", "old_price", "price",
+               "vat", "is_discounted", "is_kgt", "archived",
+               "created_at", "primary_image", "images_count", "weight"]
+    rows: list = []
+    last_id = ""
+    while True:
+        body = {"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": 1000}
+        data = _ozon_seller_request(account, "POST", "/v3/product/list", body=body)
+        result = data.get("result") or {}
+        items  = result.get("items") or []
+        if not items:
+            break
+        ids = [it.get("product_id") for it in items if it.get("product_id")]
+        info = _ozon_seller_request(account, "POST", "/v3/product/info/list",
+                                    body={"product_id": ids})
+        info_items = (info.get("result") or {}).get("items") \
+                     or (info.get("items") or [])
+        info_by_id = {(it.get("id") or it.get("product_id")): it for it in info_items}
+        for it in items:
+            full = info_by_id.get(it.get("product_id")) or {}
+            mp = full.get("marketing_price")
+            if isinstance(mp, dict):
+                mp = mp.get("price")
+            barcodes = full.get("barcodes") or ([full.get("barcode")] if full.get("barcode") else [])
+            images   = full.get("images") or []
+            rows.append([
+                it.get("product_id"), it.get("offer_id"), full.get("name", ""),
+                ",".join(str(x) for x in barcodes if x),
+                full.get("category_id") or full.get("description_category_id"),
+                mp, full.get("min_price"), full.get("old_price"), full.get("price"),
+                full.get("vat"), full.get("is_discounted"), full.get("is_kgt"),
+                full.get("archived"), full.get("created_at"),
+                full.get("primary_image", ""), len(images),
+                full.get("volume_weight") or full.get("weight"),
+            ])
+        last_id = result.get("last_id") or ""
+        if not last_id:
+            break
+    return [headers] + rows
+
+def _ozon_fetch_stock(account: dict) -> list:
+    headers = ["product_id", "offer_id", "sku", "warehouse_name",
+               "present", "reserved"]
+    rows: list = []
+    cursor = ""
+    while True:
+        body = {"cursor": cursor, "limit": 1000, "filter": {"visibility": "ALL"}}
+        data = _ozon_seller_request(account, "POST", "/v4/product/info/stocks", body=body)
+        items = data.get("items") or []
+        if not items:
+            break
+        for it in items:
+            offer  = it.get("offer_id")
+            pid    = it.get("product_id")
+            for s in (it.get("stocks") or []):
+                rows.append([
+                    pid, offer, s.get("sku"),
+                    s.get("warehouse_name") or s.get("type") or "",
+                    s.get("present"), s.get("reserved"),
+                ])
+        cursor = data.get("cursor") or ""
+        if not cursor or len(items) < 1000:
+            break
+    return [headers] + rows
+
+def _ozon_fetch_posting_fbs(account: dict, start: str, end: str) -> list:
+    return _ozon_fetch_posting(account, start, end, fbo=False)
+
+def _ozon_fetch_posting_fbo(account: dict, start: str, end: str) -> list:
+    return _ozon_fetch_posting(account, start, end, fbo=True)
+
+def _ozon_fetch_posting(account: dict, start: str, end: str, fbo: bool) -> list:
+    """One row per (posting × product). Chunks period by 30 days for safety."""
+    headers = [
+        "posting_number", "order_id", "order_number", "status", "substatus",
+        "in_process_at", "shipment_date", "delivery_method_name", "warehouse_name",
+        "tracking_number", "is_express",
+        "product_sku", "product_offer_id", "product_name",
+        "product_price", "product_quantity", "product_currency_code",
+        "delivery_price", "commission_amount", "payout",
+    ]
+    rows: list = []
+    path = "/v2/posting/fbo/list" if fbo else "/v3/posting/fbs/list"
+    cur  = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    while cur <= end_dt:
+        chunk_end = min(cur + timedelta(days=29), end_dt)
+        offset = 0
+        limit  = 1000
+        while True:
+            body = {
+                "dir": "ASC",
+                "filter": {
+                    "since": _ozon_iso(cur.strftime("%Y-%m-%d"), False),
+                    "to":    _ozon_iso(chunk_end.strftime("%Y-%m-%d"), True),
+                },
+                "limit":  limit,
+                "offset": offset,
+                "with":   {"analytics_data": True, "financial_data": True},
+            }
+            data = _ozon_seller_request(account, "POST", path, body=body)
+            result = data.get("result") or {}
+            postings = result if isinstance(result, list) else (result.get("postings") or [])
+            if not postings:
+                break
+            for p in postings:
+                dm = p.get("delivery_method") or {}
+                fin = p.get("financial_data") or {}
+                fin_products = {fp.get("product_id"): fp for fp in (fin.get("products") or [])}
+                base = [
+                    p.get("posting_number"), p.get("order_id"), p.get("order_number"),
+                    p.get("status"), p.get("substatus"),
+                    p.get("in_process_at"), p.get("shipment_date"),
+                    dm.get("name", ""), dm.get("warehouse", ""),
+                    p.get("tracking_number"), p.get("is_express"),
+                ]
+                for prod in (p.get("products") or []):
+                    fp = fin_products.get(prod.get("product_id")) or {}
+                    rows.append(base + [
+                        prod.get("sku"), prod.get("offer_id"), prod.get("name"),
+                        prod.get("price"), prod.get("quantity"),
+                        prod.get("currency_code"),
+                        fp.get("delivery_price"), fp.get("commission_amount"),
+                        fp.get("payout"),
+                    ])
+            if len(postings) < limit:
+                break
+            offset += limit
+        cur = chunk_end + timedelta(days=1)
+    return [headers] + rows
+
+def _ozon_fetch_finance_transaction(account: dict, start: str, end: str) -> list:
+    headers = [
+        "operation_id", "operation_type", "operation_type_name", "operation_date",
+        "type", "posting_number", "delivery_schema",
+        "amount", "accruals_for_sale", "sale_commission",
+        "delivery_charge", "return_delivery_charge",
+        "services_count", "services_total", "services_summary",
+    ]
+    rows: list = []
+    cur    = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    while cur <= end_dt:
+        chunk_end = min(cur + timedelta(days=29), end_dt)
+        page = 1
+        page_size = 1000
+        while True:
+            body = {
+                "filter": {
+                    "date": {
+                        "from": _ozon_iso(cur.strftime("%Y-%m-%d"), False),
+                        "to":   _ozon_iso(chunk_end.strftime("%Y-%m-%d"), True),
+                    },
+                    "operation_type":  [],
+                    "posting_number":  "",
+                    "transaction_type": "all",
+                },
+                "page":      page,
+                "page_size": page_size,
+            }
+            data = _ozon_seller_request(account, "POST",
+                                        "/v3/finance/transaction/list", body=body)
+            result = data.get("result") or {}
+            ops    = result.get("operations") or []
+            if not ops:
+                break
+            for op in ops:
+                posting  = op.get("posting") or {}
+                services = op.get("services") or []
+                services_total = 0.0
+                try:
+                    services_total = sum(float(s.get("price") or 0) for s in services)
+                except Exception:
+                    pass
+                services_summary = "; ".join(
+                    f"{s.get('name','')}={s.get('price','')}" for s in services
+                )[:1500]
+                rows.append([
+                    op.get("operation_id"), op.get("operation_type"),
+                    op.get("operation_type_name"), op.get("operation_date"),
+                    op.get("type"),
+                    posting.get("posting_number"), posting.get("delivery_schema"),
+                    op.get("amount"), op.get("accruals_for_sale"),
+                    op.get("sale_commission"), op.get("delivery_charge"),
+                    op.get("return_delivery_charge"),
+                    len(services), services_total, services_summary,
+                ])
+            if len(ops) < page_size:
+                break
+            page += 1
+        cur = chunk_end + timedelta(days=1)
+    return [headers] + rows
+
+def _ozon_fetch_returns_fbs(account: dict) -> list:
+    return _ozon_fetch_returns(account, fbo=False)
+
+def _ozon_fetch_returns_fbo(account: dict) -> list:
+    return _ozon_fetch_returns(account, fbo=True)
+
+def _ozon_fetch_returns(account: dict, fbo: bool) -> list:
+    headers = ["id", "posting_number", "order_id", "sku", "offer_id", "name",
+               "quantity", "price", "status_name", "return_reason_name",
+               "accepted_from_customer_moment", "returned_to_ozon_moment"]
+    rows: list = []
+    path = "/v1/returns/company/fbo" if fbo else "/v1/returns/company/fbs"
+    offset = 0
+    limit  = 1000
+    while True:
+        body = {"filter": {}, "limit": limit, "offset": offset}
+        data = _ozon_seller_request(account, "POST", path, body=body)
+        items = data.get("returns") or data.get("result") or []
+        if isinstance(items, dict):
+            items = items.get("returns") or []
+        if not items:
+            break
+        for r in items:
+            reason = r.get("return_reason") or {}
+            rows.append([
+                r.get("id"), r.get("posting_number"), r.get("order_id"),
+                r.get("sku"), r.get("offer_id"), r.get("name"),
+                r.get("quantity"), r.get("price"),
+                (r.get("status_name") or (r.get("status") or {}).get("status_name", "")),
+                reason.get("name") if isinstance(reason, dict) else "",
+                r.get("accepted_from_customer_moment"),
+                r.get("returned_to_ozon_moment"),
+            ])
+        if len(items) < limit:
+            break
+        offset += limit
+    return [headers] + rows
+
+OZON_ANALYTICS_DEFAULT_METRICS = [
+    "revenue", "ordered_units", "returns",
+    "hits_view_search", "hits_view_pdp", "hits_view",
+    "hits_tocart_search", "hits_tocart_pdp", "hits_tocart",
+    "session_view_search", "session_view_pdp", "session_view",
+    "conv_tocart_search", "conv_tocart_pdp", "conv_tocart",
+    "delivered_units", "cancellations",
+]
+
+def _ozon_fetch_analytics_data(account: dict, start: str, end: str) -> list:
+    headers = ["date", "sku"] + OZON_ANALYTICS_DEFAULT_METRICS
+    rows: list = []
+    body = {
+        "date_from": start, "date_to": end,
+        "dimension": ["day", "sku"],
+        "metrics":   OZON_ANALYTICS_DEFAULT_METRICS,
+        "limit":     1000, "offset": 0,
+    }
+    while True:
+        data = _ozon_seller_request(account, "POST", "/v1/analytics/data", body=body)
+        result = (data.get("result") or {})
+        items  = result.get("data") or []
+        if not items:
+            break
+        for it in items:
+            dims = it.get("dimensions") or []
+            day  = dims[0].get("id") if len(dims) > 0 else ""
+            sku  = dims[1].get("id") if len(dims) > 1 else ""
+            metrics = it.get("metrics") or []
+            rows.append([day, sku] + list(metrics) + [None] * (len(OZON_ANALYTICS_DEFAULT_METRICS) - len(metrics)))
+        if len(items) < body["limit"]:
+            break
+        body["offset"] += body["limit"]
+    return [headers] + rows
+
+def _ozon_fetch_analytics_stocks(account: dict) -> list:
+    headers = ["sku", "offer_id", "name", "warehouse_name",
+               "ads", "idc", "stock_count", "in_transit_count",
+               "expiring_count", "expiring_quantity"]
+    rows: list = []
+    body = {"limit": 1000, "offset": 0}
+    while True:
+        try:
+            data = _ozon_seller_request(account, "POST", "/v1/analytics/stocks", body=body)
+        except Exception as e:
+            # Endpoint may require specific permissions; surface as empty with msg
+            raise
+        items = (data.get("result") or {}).get("items") or data.get("items") or []
+        if not items:
+            break
+        for it in items:
+            rows.append([
+                it.get("sku"), it.get("offer_id"), it.get("name"),
+                it.get("warehouse_name") or "",
+                it.get("ads"), it.get("idc"),
+                it.get("stock_count") or it.get("present"),
+                it.get("in_transit_count"),
+                it.get("expiring_count"),
+                it.get("expiring_quantity"),
+            ])
+        if len(items) < body["limit"]:
+            break
+        body["offset"] += body["limit"]
+    return [headers] + rows
+
+def _ozon_fetch_perf_campaigns(account: dict) -> list:
+    headers = ["id", "title", "state", "advObjectType", "fromDate", "toDate",
+               "dailyBudget", "budget", "createdAt", "updatedAt"]
+    rows: list = []
+    data  = _ozon_perf_request(account, "GET", "/api/client/campaign")
+    items = data.get("list") or []
+    for c in items:
+        rows.append([
+            c.get("id"), c.get("title"), c.get("state"),
+            c.get("advObjectType"), c.get("fromDate"), c.get("toDate"),
+            c.get("dailyBudget"), c.get("budget"),
+            c.get("createdAt"), c.get("updatedAt"),
+        ])
+    return [headers] + rows
+
+def _ozon_fetch_perf_statistics(account: dict, start: str, end: str) -> list:
+    """Daily statistics by campaign. Aggregates into one BI-style table."""
+    headers = ["date", "campaign_id", "campaign_title", "views", "clicks",
+               "moneySpent", "ordersMoney", "orders"]
+    rows: list = []
+    # 1. fetch campaign list
+    camp_data = _ozon_perf_request(account, "GET", "/api/client/campaign")
+    camps = camp_data.get("list") or []
+    if not camps:
+        return [headers]
+    title_by_id = {str(c.get("id")): c.get("title", "") for c in camps}
+    # 2. for each campaign — daily stats
+    for c in camps:
+        cid = str(c.get("id"))
+        body = {
+            "campaigns": [cid],
+            "from":      start,
+            "to":        end,
+            "groupBy":   "DATE",
+        }
+        try:
+            data = _ozon_perf_request(account, "POST", "/api/client/statistics/json",
+                                      body=body)
+        except Exception:
+            continue
+        # Response shape varies; try multiple known layouts
+        for entry in (data.get("rows") or []):
+            rows.append([
+                entry.get("date"), cid, title_by_id.get(cid, ""),
+                entry.get("views"), entry.get("clicks"),
+                entry.get("moneySpent"), entry.get("ordersMoney"), entry.get("orders"),
+            ])
+    return [headers] + rows
+
+# ── Dispatcher ─────────────────────────────────────────────────────────────
+def _ozon_fetch_dispatch(account: dict, entity: str,
+                         start: str, end: str) -> list:
+    if entity == "ozon_product":              return _ozon_fetch_product(account)
+    if entity == "ozon_stock":                return _ozon_fetch_stock(account)
+    if entity == "ozon_posting_fbs":          return _ozon_fetch_posting_fbs(account, start, end)
+    if entity == "ozon_posting_fbo":          return _ozon_fetch_posting_fbo(account, start, end)
+    if entity == "ozon_returns_fbs":          return _ozon_fetch_returns_fbs(account)
+    if entity == "ozon_returns_fbo":          return _ozon_fetch_returns_fbo(account)
+    if entity == "ozon_finance_transaction":  return _ozon_fetch_finance_transaction(account, start, end)
+    if entity == "ozon_analytics_data":       return _ozon_fetch_analytics_data(account, start, end)
+    if entity == "ozon_analytics_stocks":     return _ozon_fetch_analytics_stocks(account)
+    if entity == "ozon_perf_campaigns":       return _ozon_fetch_perf_campaigns(account)
+    if entity == "ozon_perf_statistics":      return _ozon_fetch_perf_statistics(account, start, end)
+    raise Exception(f"Неизвестная сущность Ozon: {entity}")
+
+# ── Async event iterator (mirrors Bitrix _export_event_iter) ───────────────
+async def _ozon_export_event_iter(config: dict, account_name: str, entity: str,
+                                  date_field: str, start_date: str, end_date: str):
+    account = _ozon_account_by_name(config, account_name)
+    if not account:
+        yield {"status": "error", "error": f"Аккаунт Ozon '{account_name}' не найден"}
+        return
+    yield {"status": "info", "message": f"Аккаунт: {account_name} • сущность: {entity}"}
+
+    has_period = bool(date_field and start_date and end_date)
+    try:
+        if has_period:
+            yield {"status": "info",
+                   "message": f"Период: {start_date} → {end_date} (по {date_field})"}
+        else:
+            yield {"status": "info", "message": "Без фильтра по дате (полная выгрузка)"}
+
+        # Run blocking fetcher in a thread, with periodic heartbeats.
+        _task = asyncio.ensure_future(asyncio.to_thread(
+            _ozon_fetch_dispatch, account, entity,
+            start_date or "", end_date or ""
+        ))
+        while True:
+            try:
+                await asyncio.wait_for(asyncio.shield(_task), timeout=20.0)
+                break
+            except asyncio.TimeoutError:
+                yield {"status": "info", "message": "Загрузка из Ozon..."}
+        raw = _task.result()
+        bi_n = (len(raw) - 1) if raw and isinstance(raw, list) else 0
+        yield {"status": "info", "message": f"Получено строк от Ozon: {bi_n}"}
+
+        # Push to ClickHouse
+        _ch_task = asyncio.ensure_future(
+            asyncio.to_thread(push_to_clickhouse, config, entity, raw))
+        while True:
+            try:
+                await asyncio.wait_for(asyncio.shield(_ch_task), timeout=20.0)
+                break
+            except asyncio.TimeoutError:
+                yield {"status": "info", "message": "Запись в ClickHouse..."}
+        rows = _ch_task.result()
+        yield {"status": "done", "rows": rows, "total": rows}
+    except Exception as exc:
+        yield {"status": "error", "error": str(exc)}
+
+# ── Endpoints ──────────────────────────────────────────────────────────────
+@app.get("/api/ozon/entities")
+async def api_ozon_entities():
+    return OZON_ENTITIES
+
+@app.get("/api/ozon/date-field-labels")
+async def api_ozon_date_labels():
+    return OZON_DATE_LABELS
+
+@app.get("/api/ozon/accounts")
+async def api_ozon_accounts():
+    """Return accounts WITHOUT secrets — for safe display in UI lists."""
+    out = []
+    for a in _ozon_accounts_list(load_config()):
+        out.append({
+            "name":            a.get("name", ""),
+            "client_id":       a.get("client_id", ""),
+            "has_api_key":     bool(a.get("api_key")),
+            "perf_client_id":  a.get("perf_client_id", ""),
+            "has_perf_secret": bool(a.get("perf_secret")),
+        })
+    return out
+
+@app.get("/api/ozon/accounts/{name}")
+async def api_ozon_account_get(name: str):
+    """Full account incl. secrets — used by edit dialog only."""
+    a = _ozon_account_by_name(load_config(), name)
+    if not a:
+        raise HTTPException(404, f"Аккаунт '{name}' не найден")
+    return a
+
+@app.post("/api/ozon/accounts")
+async def api_ozon_account_save(data: dict):
+    """Add or update one account (by name). Body: {name, client_id, api_key,
+    perf_client_id?, perf_secret?, original_name?}.
+    If original_name differs from name → rename.
+    Empty api_key/perf_secret keeps existing value (so UI can show '••• сохранено')."""
+    name      = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Укажите название аккаунта")
+    client_id = (data.get("client_id") or "").strip()
+    api_key   = (data.get("api_key")   or "").strip()
+    perf_cid  = (data.get("perf_client_id") or "").strip()
+    perf_sec  = (data.get("perf_secret")    or "").strip()
+    original  = (data.get("original_name") or name).strip()
+
+    config   = load_config()
+    accounts = _ozon_accounts_list(config)
+
+    existing = next((a for a in accounts if a.get("name") == original), None)
+    if not existing and original != name:
+        raise HTTPException(404, f"Аккаунт '{original}' не найден")
+
+    if name != original and any(a.get("name") == name for a in accounts):
+        raise HTTPException(409, f"Аккаунт '{name}' уже существует")
+
+    if existing:
+        existing["name"]      = name
+        existing["client_id"] = client_id
+        if api_key:
+            existing["api_key"] = api_key
+        existing["perf_client_id"] = perf_cid
+        if perf_sec:
+            existing["perf_secret"] = perf_sec
+    else:
+        accounts.append({
+            "name":           name,
+            "client_id":      client_id,
+            "api_key":        api_key,
+            "perf_client_id": perf_cid,
+            "perf_secret":    perf_sec,
+        })
+
+    config.setdefault("ozon", {})["accounts"] = accounts
+    save_config(config)
+    # Also rename references in saved_configs / schedule
+    if existing and original != name:
+        for sc in config.get("saved_configs", []):
+            if sc.get("provider") == "ozon" and sc.get("ozon_account") == original:
+                sc["ozon_account"] = name
+        save_config(config)
+    return {"status": "ok"}
+
+@app.delete("/api/ozon/accounts/{name}")
+async def api_ozon_account_delete(name: str):
+    config   = load_config()
+    accounts = _ozon_accounts_list(config)
+    new      = [a for a in accounts if a.get("name") != name]
+    if len(new) == len(accounts):
+        raise HTTPException(404, f"Аккаунт '{name}' не найден")
+    config.setdefault("ozon", {})["accounts"] = new
+    save_config(config)
+    return {"status": "ok"}
+
+@app.post("/api/ozon/test-connection")
+async def api_ozon_test(data: dict):
+    name    = (data.get("name") or "").strip()
+    config  = load_config()
+    account = _ozon_account_by_name(config, name)
+    if not account:
+        return {"seller": False, "seller_error": f"Аккаунт '{name}' не найден"}
+    out: dict = {}
+    # Seller API: ping with cheap call
+    try:
+        _ozon_seller_request(account, "POST", "/v3/product/list",
+                             body={"filter": {"visibility": "ALL"}, "last_id": "", "limit": 1},
+                             timeout=20)
+        out["seller"] = True
+    except Exception as exc:
+        out["seller"] = False
+        out["seller_error"] = str(exc)
+    # Performance API (optional)
+    if (account.get("perf_client_id") or "").strip() and (account.get("perf_secret") or "").strip():
+        try:
+            _ozon_perf_token(account)
+            out["perf"] = True
+        except Exception as exc:
+            out["perf"] = False
+            out["perf_error"] = str(exc)
+    return out
+
+@app.post("/api/ozon/export-stream")
+async def api_ozon_export_stream(data: dict):
+    config = load_config()
+    account_name = (data.get("account") or "").strip()
+    entity       = data.get("entity", "")
+    date_field   = data.get("date_field", "")
+    start_date   = data.get("start_date", "")
+    end_date     = data.get("end_date", "")
+
+    async def gen():
+        inner = _ozon_export_event_iter(config, account_name, entity,
+                                        date_field, start_date, end_date)
+        async for ev in _iter_with_history(
+            inner,
+            source="manual_form", entity=entity, date_field=date_field,
+            start_date=start_date, end_date=end_date,
+            dimensions_filters=[{"fieldName": "OZON_ACCOUNT", "values": [account_name],
+                                 "type": "INCLUDE", "operator": "IN_LIST"}] if account_name else [],
+            fields=[],
+            provider="ozon",
+            config_name=None,
+        ):
+            yield _sse(ev)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+# ---------------------------------------------------------------------------
+
 
 if __name__ == "__main__":
     import uvicorn

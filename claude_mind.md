@@ -162,6 +162,90 @@
 - Wrapper над `fetch_from_bitrix`: ловит ошибку `Unrecognized column 'X'` со стороны Bitrix BI, удаляет X из `fields`, повторяет (до 30 итераций).
 - Возвращает `(raw, removed[])`. В стрим выводится info с пропущенными полями.
 
+## Provider abstraction (подготовка к Ozon)
+
+После рефакторинга добавлены концепции мульти-провайдерности — но **существующее поведение не изменилось**:
+
+### Поле `provider` в данных
+- `saved_configs[*].provider` — `"bitrix"` (обязательное поле для новых, бекфилл при чтении для legacy)
+- `history[*].provider` — пишется при создании записи, бекфилл при чтении
+- `config.json` имеет секцию `"ozon": {"client_id": "", "api_key": ""}` — добавляется автоматически в `load_config` (in-memory), на диск пишется только при первом сохранении настроек
+
+### Endpoint'ы текущей версии
+**Все Bitrix-endpoint'ы остались на своих URL** — НЕ переименовывались. Когда добавится Ozon, его endpoint'ы пойдут под префиксом `/api/ozon/...` рядом, без удаления старых.
+
+### Параметр `provider` в коде
+- `_do_export(data, source, config_name, provider="bitrix")`
+- `_iter_with_history(..., provider="bitrix")`
+- `_run_scheduled` берёт provider из самого saved-config'а
+- `/api/export-stream` принимает provider в body (default "bitrix")
+- `/api/manual-export-stream` берёт provider из jobs[i].provider
+
+### Section markers в main.py
+- `# === BITRIX24 PROVIDER ===` — после "Config helpers"
+- `# === OZON PROVIDER ===` (stub с TODO) — внизу перед `if __name__`
+
+### Ozon — реализован (Шаг 3 готов)
+Под маркером `# === OZON PROVIDER ===` в main.py:
+- `OZON_API_BASE` (Seller API) + `OZON_PERF_BASE` (Performance API)
+- Клиент `_ozon_seller_request` (Client-Id + Api-Key headers)
+- `_ozon_perf_token` + `_ozon_perf_request` — OAuth2 токен с кэшем (TTL 30 мин)
+- `_ozon_accounts_list` / `_ozon_account_by_name` — multi-account доступ
+- Каталог `OZON_ENTITIES` (4 категории, 10 сущностей)
+- Fetchers (все возвращают BI-формат `[headers, ...rows]`):
+  - `_ozon_fetch_product` — `/v3/product/list` + `/v3/product/info/list`
+  - `_ozon_fetch_stock` — `/v4/product/info/stocks`
+  - `_ozon_fetch_posting_fbs/fbo` — `/v3/posting/fbs/list` или `/v2/posting/fbo/list`, чанк 30 дней, **flat row per (posting × product)**
+  - `_ozon_fetch_finance_transaction` — `/v3/finance/transaction/list`, services flat в строку
+  - `_ozon_fetch_returns_fbs/fbo` — `/v1/returns/company/{fbs,fbo}`
+  - `_ozon_fetch_analytics_data` — `/v1/analytics/data` с дефолтными метриками (выручка, заказы, показы, конверсия)
+  - `_ozon_fetch_analytics_stocks` — `/v1/analytics/stocks` (требует прав)
+  - `_ozon_fetch_perf_campaigns` — Performance: список кампаний
+  - `_ozon_fetch_perf_statistics` — Performance: статистика по дням
+- Dispatcher `_ozon_fetch_dispatch(account, entity, start, end)`
+- Async `_ozon_export_event_iter(config, account_name, entity, ...)` — даёт events `info/done/error` совместимо с Bitrix-стримом
+- Endpoints:
+  - `GET /api/ozon/entities` / `GET /api/ozon/date-field-labels`
+  - `GET /api/ozon/accounts` (без секретов) / `GET /api/ozon/accounts/{name}` (с секретами)
+  - `POST /api/ozon/accounts` (создать/обновить, поддержка `original_name` для переименования; пустой api_key/perf_secret сохраняет существующее)
+  - `DELETE /api/ozon/accounts/{name}`
+  - `POST /api/ozon/test-connection` body={name} → проверяет Seller + Performance
+  - `POST /api/ozon/export-stream` body={account, entity, date_field?, start_date?, end_date?}
+
+### Multi-account Ozon в config.json
+- `config["ozon"]["accounts"] = [{name, client_id, api_key, perf_client_id, perf_secret}]`
+- При загрузке legacy-формата `{client_id, api_key}` — auto-wrap в один аккаунт с именем "Магазин"
+- saved_configs поддерживает `ozon_account` (имя аккаунта)
+- При rename аккаунта — обновляются ссылки в saved_configs
+
+### Provider dispatch
+- `_do_export(data, source, config_name, provider)` — для `provider="ozon"` вызывает `_ozon_fetch_dispatch` синхронно, иначе `fetch_from_bitrix_safe`
+- Manual-batch — каждый job диспетчится отдельно (`provider`/`ozon_account` в job)
+- `_export_event_iter` остался Bitrix-only; для Ozon отдельный `_ozon_export_event_iter`. Оба оборачиваются `_iter_with_history`.
+
+### Frontend
+- Страница "Подключение" переделана: 3 свёртываемые секции (`<details>`):
+  - **ClickHouse** (всегда раскрыта, обязательна) — два ряда полей в `form-row-2`
+  - **Bitrix24** (опциональна, свёрнута; раздел смарт-процессов — вложенный subblock)
+  - **Ozon** (опциональна; multi-account UI с кнопкой "+ Добавить кабинет Ozon")
+- Каждая секция имеет свой статус-бейдж (`#chStatusBadge`/`#bxStatusBadge`/`#ozStatusBadge` — пока неактивны, заглушка)
+- Модалка `#ozonAccountModal` — редактор аккаунта (Seller + Performance), пустые поля паролей сохраняют текущие значения
+- Единая система подсказок: `<span class="hint" data-tip="...">?</span>` — pure CSS tooltip на hover/focus
+- На "Отправка данных":
+  - Pill-переключатель Bitrix/Ozon (`.provider-switch`)
+  - Когда Ozon — появляется dropdown `#exportOzonAccount`, и блок Bitrix-фильтров скрывается
+  - Каталог сущностей подменяется в `fillEntitySelect(selectId, provider)`
+  - `runExport` диспетчит на `/api/export-stream` или `/api/ozon/export-stream`
+  - `applyConfigToExportForm(cfg)` сначала вызывает `switchProvider(cfg.provider)` чтобы dropdown сущностей был корректным
+- Сохранённые конфиги показывают provider-бейдж (🔵 B24 / 🟠 Ozon) и имя Ozon-аккаунта в скобках
+
+### TODO для следующих итераций
+- Реальная индикация статуса подключения для каждой секции (`#chStatusBadge`/etc)
+- Поддержка Ozon в "Сверке данных" (modify_field подбор для Ozon)
+- Аналитика Ozon: возможность настраивать набор metrics через UI (сейчас захардкожен дефолт)
+- Ozon Performance API: автоопределение типов кампаний для статистики (сейчас один общий запрос)
+- Ozon analytics_stocks может вернуть 403 — нужны права в API ключе (показывать понятную ошибку)
+
 ## Стиль кода
 - Всё в одном файле (backend и frontend) — пользователь готов к большим файлам, но добавление файлов нежелательно без явной необходимости
 - Минимум комментариев на русском в backend, немного — на английском

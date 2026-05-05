@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 
@@ -27,7 +27,7 @@
     </div>
     <div class="sidebar-logo-text">
       <div class="sidebar-logo-name">b24endclickhouse</div>
-      <div class="sidebar-logo-sub">v1.0</div>
+      <div class="sidebar-logo-sub">v2.0</div>
     </div>
   </div>
 
@@ -79,6 +79,28 @@
         <span>Проверка подключения...</span>
       </div>
 
+      <!-- Provider switch (Bitrix vs Ozon) -->
+      <div class="provider-switch">
+        <button type="button" class="prov-btn active" data-prov="bitrix" onclick="switchProvider('bitrix')">
+          <span class="prov-mark prov-mark-bitrix"></span>
+          Bitrix24
+        </button>
+        <button type="button" class="prov-btn" data-prov="ozon" onclick="switchProvider('ozon')">
+          <span class="prov-mark prov-mark-ozon"></span>
+          Ozon
+        </button>
+      </div>
+
+      <!-- Ozon account selector (only when ozon active) -->
+      <div id="ozonAccountWrap" class="form-group" style="display:none">
+        <label class="form-label">Кабинет Ozon
+          <span class="hint" data-tip="Если ещё не подключён — добавьте на вкладке «Подключение»"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+        </label>
+        <select id="exportOzonAccount" class="form-control">
+          <option value="">— нет подключённых кабинетов —</option>
+        </select>
+      </div>
+
       <div class="saved-configs-panel">
         <div class="form-group">
           <label class="form-label">Сохранённые конфигурации</label>
@@ -88,10 +110,17 @@
             </select>
             <button class="btn btn-secondary sc-btn" type="button"
                     onclick="loadSelectedConfig()">Загрузить</button>
-            <button class="btn btn-secondary sc-btn" type="button"
-                    onclick="renameSelectedConfig()">Переименовать</button>
-            <button class="btn btn-danger sc-btn" type="button"
-                    onclick="deleteSelectedConfig()">Удалить</button>
+            <div class="sc-menu-wrap">
+              <button class="btn btn-secondary sc-btn sc-menu-btn" type="button"
+                      onclick="toggleSavedCfgMenu(event)" title="Действия">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5"  r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+              </button>
+              <div class="sc-menu" id="savedCfgMenu">
+                <a onclick="renameSelectedConfig(); closeSavedCfgMenu()">Переименовать</a>
+                <a onclick="overwriteSelectedConfig(); closeSavedCfgMenu()">Перезаписать выбранную</a>
+                <a class="sc-menu-danger" onclick="deleteSelectedConfig(); closeSavedCfgMenu()">Удалить</a>
+              </div>
+            </div>
           </div>
         </div>
         <div class="form-group">
@@ -101,8 +130,6 @@
                    placeholder="Название (например: Сделки воронка №1, поля A/B/C)">
             <button class="btn btn-primary sc-btn" type="button"
                     onclick="saveCurrentAsConfig()">Сохранить</button>
-            <button class="btn btn-secondary sc-btn" type="button"
-                    onclick="overwriteSelectedConfig()" title="Перезаписать выбранную выше конфигурацию">Перезаписать выбранную</button>
           </div>
         </div>
         <div id="savedCfgMsg" class="result-msg"></div>
@@ -372,79 +399,186 @@
   <!-- ── Settings page ─────────────────────────────────────────── -->
   <div class="page" id="page-settings">
     <div class="page-header">
-      <div class="page-title">Настройка подключения</div>
-      <div class="page-subtitle">Укажите данные Bitrix24 и ClickHouse для начала работы</div>
+      <div class="page-title">Подключение</div>
+      <div class="page-subtitle">Каждый источник настраивается независимо. ClickHouse обязателен; Bitrix24 и Ozon — опциональны.</div>
     </div>
 
-    <div class="card">
-      <div class="section-title">Bitrix24</div>
-
-      <div class="form-group">
-        <label class="form-label">Адрес портала</label>
-        <input type="text" id="settPortal" class="form-control"
-               placeholder="example.bitrix24.ru">
-      </div>
-      <div class="form-group">
-        <label class="form-label">BI-ключ Битрикс24</label>
-        <input type="text" id="settBiKey" class="form-control"
-               placeholder="Ключ из раздела BI-аналитика">
-      </div>
-      <div class="form-group">
-        <label class="form-label">
-          REST API Webhook
-          <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0">(необязательно)</span>
-        </label>
-        <input type="text" id="settWebhook" class="form-control"
-               placeholder="https://b24.example.ru/rest/1/abc123xyz/">
-        <div style="font-size:11px;color:var(--text-3);margin-top:5px">
-          Профиль → Разработчикам → Входящий вебхук (права: CRM) — для автозагрузки смарт-процессов
+    <!-- ClickHouse (always shown, expanded by default) -->
+    <details class="conn-block" open>
+      <summary class="conn-summary">
+        <span class="conn-icon"><img src="/static/clickhouse.png" alt="" loading="lazy"></span>
+        <span class="conn-title">ClickHouse</span>
+        <span class="conn-required">обязательно</span>
+        <span id="chStatusBadge" class="conn-mini unk"></span>
+        <span class="conn-chevron">▾</span>
+      </summary>
+      <div class="conn-body">
+        <p class="conn-help">
+          Куда писать данные. Если у вас Yandex Cloud — хост заканчивается на <code>.mdb.yandexcloud.net</code>, порт <b>8443</b>.
+          Для локального ClickHouse без SSL — порт <b>8123</b>.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Хост
+            <span class="hint" data-tip="Например: c-xxx.rw.mdb.yandexcloud.net (для Yandex Cloud) или localhost / IP-адрес"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="text" id="settHost" class="form-control" placeholder="c-xxx.rw.mdb.yandexcloud.net">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Порт
+              <span class="hint" data-tip="8443 — HTTPS (Yandex Cloud); 8123 — HTTP (локально); 9440 — TCP+TLS"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+            </label>
+            <input type="number" id="settPort" class="form-control" value="8443">
+          </div>
+          <div class="form-group">
+            <label class="form-label">База данных
+              <span class="hint" data-tip="Имя БД, в которую будут писаться таблицы. Обычно 'default'"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+            </label>
+            <input type="text" id="settDb" class="form-control" value="default">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Пользователь</label>
+            <input type="text" id="settUser" class="form-control" value="admin">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Пароль</label>
+            <input type="password" id="settPass" class="form-control">
+          </div>
         </div>
       </div>
+    </details>
 
-      <div class="section-title">ClickHouse</div>
+    <!-- Bitrix24 (collapsible, optional) -->
+    <details class="conn-block">
+      <summary class="conn-summary">
+        <span class="conn-icon"><img src="/static/bitrix24.png" alt="" loading="lazy"></span>
+        <span class="conn-title">Bitrix24</span>
+        <span class="conn-optional">опционально</span>
+        <span id="bxStatusBadge" class="conn-mini unk"></span>
+        <span class="conn-chevron">▾</span>
+      </summary>
+      <div class="conn-body">
+        <p class="conn-help">
+          Для выгрузки CRM-данных через BI-коннектор. Если работаете только с Ozon — оставьте пустым, эта секция не будет блокировать приложение.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Адрес портала
+            <span class="hint" data-tip="Без http:// — просто example.bitrix24.ru или example.ru если у вас свой домен"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="text" id="settPortal" class="form-control" placeholder="example.bitrix24.ru">
+        </div>
+        <div class="form-group">
+          <label class="form-label">BI-ключ Битрикс24
+            <span class="hint" data-tip="CRM → BI-аналитика → Управление ключами → создать новый ключ. Длинная строка букв и цифр"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="text" id="settBiKey" class="form-control" placeholder="Ключ из раздела BI-аналитика">
+        </div>
+        <div class="form-group">
+          <label class="form-label">REST API Webhook
+            <span class="hint" data-tip="Профиль → Разработчикам → Входящий вебхук (права CRM). Нужен для автоподтягивания названий полей и смарт-процессов"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+            <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0">(необязательно)</span>
+          </label>
+          <input type="text" id="settWebhook" class="form-control" placeholder="https://b24.example.ru/rest/1/abc123xyz/">
+        </div>
 
-      <div class="form-group">
-        <label class="form-label">Хост</label>
-        <input type="text" id="settHost" class="form-control"
-               placeholder="c-xxx.rw.mdb.yandexcloud.net">
+        <details class="conn-subblock">
+          <summary>Смарт-процессы и кастомные сущности</summary>
+          <p class="conn-help">
+            Смарт-процессы уникальны для каждого портала. Добавьте вручную: код таблицы вида
+            <code>crm_dynamic_items_105</code> и название.
+          </p>
+          <div id="customEntitiesList"></div>
+          <div class="btn-row" style="margin-bottom:8px;margin-top:8px">
+            <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px"
+                    onclick="addCustomEntityRow()">+ Добавить вручную</button>
+            <button class="btn btn-primary" style="font-size:12px;padding:6px 12px"
+                    id="btnAutoLoad" onclick="autoLoadSmartProcesses()">⟳ Загрузить автоматически</button>
+          </div>
+          <div id="autoLoadResult" class="result-msg"></div>
+        </details>
       </div>
-      <div class="form-group">
-        <label class="form-label">Порт</label>
-        <input type="number" id="settPort" class="form-control" value="8443">
-      </div>
-      <div class="form-group">
-        <label class="form-label">База данных</label>
-        <input type="text" id="settDb" class="form-control" value="default">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Пользователь</label>
-        <input type="text" id="settUser" class="form-control" value="admin">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Пароль</label>
-        <input type="password" id="settPass" class="form-control">
-      </div>
+    </details>
 
-      <div class="section-title">Смарт-процессы и кастомные сущности</div>
-      <p style="font-size:13px;color:var(--text-2);margin-bottom:14px;line-height:1.6">
-        Смарт-процессы уникальны для каждого портала. Добавь их вручную: код таблицы вида
-        <code>crm_dynamic_items_105</code> и название. ID смарт-процесса можно найти в Bitrix24 →
-        CRM → Настройки → Смарт-процессы (в URL страницы).
-      </p>
-      <div id="customEntitiesList"></div>
-      <div class="btn-row" style="margin-bottom:8px">
-        <button class="btn btn-secondary" style="font-size:12px;padding:8px 14px"
-                onclick="addCustomEntityRow()">+ Добавить вручную</button>
-        <button class="btn btn-primary" style="font-size:12px;padding:8px 14px"
-                id="btnAutoLoad" onclick="autoLoadSmartProcesses()">⟳ Загрузить автоматически</button>
+    <!-- Ozon (collapsible, optional, multi-account) -->
+    <details class="conn-block">
+      <summary class="conn-summary">
+        <span class="conn-icon"><img src="/static/ozon.webp" alt="" loading="lazy"></span>
+        <span class="conn-title">Ozon</span>
+        <span class="conn-optional">опционально, несколько кабинетов</span>
+        <span id="ozStatusBadge" class="conn-mini unk"></span>
+        <span class="conn-chevron">▾</span>
+      </summary>
+      <div class="conn-body">
+        <p class="conn-help">
+          Можно подключить несколько личных кабинетов Ozon (например, два магазина). Каждый — отдельным аккаунтом.
+          Ключи получаются в Seller API: <b>Настройки → Seller API → API ключи</b>.
+          Для рекламной аналитики — отдельные ключи Performance API в разделе <b>Реклама → Performance API</b>.
+        </p>
+        <div id="ozonAccountsList" class="ozon-accounts-list"></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" type="button" onclick="addOzonAccount()">+ Добавить кабинет Ozon</button>
+        </div>
       </div>
-      <div id="autoLoadResult" class="result-msg"></div>
+    </details>
 
-      <div class="btn-row" style="margin-top:20px">
+    <!-- Save / Test -->
+    <div class="card conn-actions-card">
+      <div class="btn-row">
         <button class="btn btn-primary" onclick="saveSettings()">Сохранить настройки</button>
-        <button class="btn btn-secondary" onclick="testConnection()">Проверить подключение</button>
+        <button class="btn btn-secondary" onclick="testConnection()">Проверить ClickHouse + Bitrix</button>
       </div>
       <div id="settResult" class="result-msg"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Ozon account editor -->
+  <div id="ozonAccountModal" class="modal-backdrop" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <span id="ozonModalTitle">Аккаунт Ozon</span>
+        <span class="modal-close" onclick="closeOzonModal()">×</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Название аккаунта
+            <span class="hint" data-tip="Любое название для удобства, например 'Магазин 1' или 'Основной кабинет'"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="text" id="ozonAccName" class="form-control" placeholder="Магазин 1">
+        </div>
+        <div class="conn-section-title">Seller API <span class="conn-required-inline">обязательно</span></div>
+        <p class="conn-help-sm">Настройки → Seller API → API ключи → создать ключ с нужными правами</p>
+        <div class="form-group">
+          <label class="form-label">Client ID
+            <span class="hint" data-tip="Цифровой идентификатор клиента из раздела Seller API. Обычно 5–7 цифр."><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="text" id="ozonAccClientId" class="form-control" placeholder="123456">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Key
+            <span class="hint" data-tip="Длинный токен. Не публиковать! Хранится локально в config.json. Если оставить пустым при редактировании — текущее значение сохранится"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
+          </label>
+          <input type="password" id="ozonAccApiKey" class="form-control" placeholder="••• оставить пустым для сохранения текущего">
+        </div>
+
+        <div class="conn-section-title">Performance API <span class="conn-optional-inline">опционально, для рекламы</span></div>
+        <p class="conn-help-sm">Реклама → Performance API → API ключи. Нужно только если хотите выгружать статистику рекламных кампаний</p>
+        <div class="form-group">
+          <label class="form-label">Performance Client ID</label>
+          <input type="text" id="ozonAccPerfId" class="form-control" placeholder="UUID или строка">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Performance Client Secret</label>
+          <input type="password" id="ozonAccPerfSecret" class="form-control" placeholder="••• оставить пустым для сохранения текущего">
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" onclick="saveOzonAccount()">Сохранить</button>
+        <button class="btn btn-secondary" onclick="testOzonAccountFromModal()">Проверить подключение</button>
+        <button class="btn btn-secondary" onclick="closeOzonModal()">Отмена</button>
+      </div>
+      <div id="ozonModalResult" class="result-msg"></div>
     </div>
   </div>
 
@@ -616,11 +750,18 @@ document.querySelectorAll('.nav-item').forEach(item => {
 // ═══════════════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════════════
+let CURRENT_PROVIDER = 'bitrix';
+
 async function boot() {
-  [ENTITIES, DATE_LABELS] = await Promise.all([
+  const [ents, dlabs, ozEnts, ozDlabs] = await Promise.all([
     fetch('/api/entities').then(r => r.json()),
     fetch('/api/date-field-labels').then(r => r.json()),
+    fetch('/api/ozon/entities').then(r => r.json()).catch(() => ({})),
+    fetch('/api/ozon/date-field-labels').then(r => r.json()).catch(() => ({})),
   ]);
+  ENTITIES = ents;
+  DATE_LABELS = Object.assign({}, dlabs, ozDlabs);
+  OZON_ENTITIES_CAT = ozEnts;
 
   fillEntitySelect('exportEntity');
 
@@ -667,6 +808,7 @@ async function boot() {
     LS.set('bi_reconcile_end', v('reconcileEndDate')));
 
   await loadSettings();
+  await loadOzonAccounts();
   await loadSavedConfigs();
   await loadSchedule();
   await refreshConnectionBadges();
@@ -678,20 +820,94 @@ async function boot() {
     sel.value = savedEntity;
     if (sel.value === savedEntity) onEntityChange('export');
   }
+
+  initTooltips();
+  initSavedCfgMenu();
+}
+
+// ─── Tooltip system (JS-positioned, never clipped) ─────────────────
+let _tipEl = null;
+function _ensureTipEl() {
+  if (_tipEl) return _tipEl;
+  _tipEl = document.createElement('div');
+  _tipEl.id = 'globalTooltip';
+  document.body.appendChild(_tipEl);
+  return _tipEl;
+}
+function showTooltip(target) {
+  const text = target.getAttribute('data-tip');
+  if (!text) return;
+  const t = _ensureTipEl();
+  t.textContent = text;
+  t.dataset.pos = 'bottom';
+  t.classList.add('show');
+  // Measure & position
+  const r = target.getBoundingClientRect();
+  const tr = t.getBoundingClientRect();
+  let left = r.left + r.width/2 - tr.width/2;
+  const margin = 8;
+  if (left < margin) left = margin;
+  if (left + tr.width > window.innerWidth - margin) left = window.innerWidth - tr.width - margin;
+  // arrow x relative to tooltip
+  const arrowX = (r.left + r.width/2) - left;
+  t.style.setProperty('--arrow-x', arrowX + 'px');
+  // place below if room, else above
+  let top = r.bottom + 10;
+  if (top + tr.height > window.innerHeight - margin) {
+    top = r.top - tr.height - 10;
+    t.dataset.pos = 'top';
+  }
+  t.style.left = left + 'px';
+  t.style.top  = top  + 'px';
+}
+function hideTooltip() {
+  if (_tipEl) _tipEl.classList.remove('show');
+}
+function initTooltips() {
+  document.body.addEventListener('mouseover', e => {
+    const h = e.target.closest('.hint');
+    if (h) showTooltip(h);
+  });
+  document.body.addEventListener('mouseout', e => {
+    if (e.target.closest('.hint')) hideTooltip();
+  });
+  document.body.addEventListener('focusin', e => {
+    if (e.target.classList && e.target.classList.contains('hint')) showTooltip(e.target);
+  });
+  document.body.addEventListener('focusout', hideTooltip);
+  window.addEventListener('scroll', hideTooltip, true);
+}
+
+// ─── Saved-configs 3-dot menu ──────────────────────────────────────
+function initSavedCfgMenu() {
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('savedCfgMenu');
+    if (!menu) return;
+    if (!e.target.closest('.sc-menu-wrap')) closeSavedCfgMenu();
+  });
+}
+function toggleSavedCfgMenu(ev) {
+  ev.stopPropagation();
+  const m = document.getElementById('savedCfgMenu');
+  if (m) m.classList.toggle('open');
+}
+function closeSavedCfgMenu() {
+  const m = document.getElementById('savedCfgMenu');
+  if (m) m.classList.remove('open');
 }
 
 // ═══════════════════════════════════════════════════════════════
 // Entity selects
 // ═══════════════════════════════════════════════════════════════
-function fillEntitySelect(selectId) {
+function fillEntitySelect(selectId, provider) {
+  provider = provider || CURRENT_PROVIDER || 'bitrix';
   const sel = document.getElementById(selectId);
-  // Reset fully — removes both <option> and <optgroup> elements
   sel.innerHTML = '<option value="">— выберите сущность —</option>';
-
-  for (const [cat, items] of Object.entries(ENTITIES)) {
+  const cat = provider === 'ozon' ? OZON_ENTITIES_CAT : ENTITIES;
+  for (const [name, items] of Object.entries(cat || {})) {
     const grp = document.createElement('optgroup');
-    grp.label = cat;
-    items.forEach(e => {
+    grp.label = name;
+    (items || []).forEach(e => {
       const opt = document.createElement('option');
       opt.value = e.code;
       opt.textContent = e.name;
@@ -702,11 +918,54 @@ function fillEntitySelect(selectId) {
 }
 
 function findEntity(code) {
-  for (const items of Object.values(ENTITIES)) {
+  if (!code) return null;
+  for (const items of Object.values(ENTITIES || {})) {
+    const e = items.find(x => x.code === code);
+    if (e) return e;
+  }
+  for (const items of Object.values(OZON_ENTITIES_CAT || {})) {
     const e = items.find(x => x.code === code);
     if (e) return e;
   }
   return null;
+}
+
+function entityProvider(code) {
+  if (!code) return 'bitrix';
+  return String(code).startsWith('ozon_') ? 'ozon' : 'bitrix';
+}
+
+function switchProvider(prov) {
+  CURRENT_PROVIDER = prov;
+  document.querySelectorAll('.prov-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.prov === prov));
+  document.getElementById('ozonAccountWrap').style.display = (prov === 'ozon') ? '' : 'none';
+  // Bitrix-specific blocks shown only for Bitrix
+  document.getElementById('filtersSection').style.display = 'none';
+  // Refill entity select
+  fillEntitySelect('exportEntity', prov);
+  document.getElementById('exportEntity').value = '';
+  refreshOzonAccountSelects();
+  // Reset filter section visibility (for ozon there are no filters)
+  if (prov === 'ozon') {
+    document.getElementById('dateSection').style.display = 'none';
+  }
+  LS.set('bi_export_provider', prov);
+}
+
+function refreshOzonAccountSelects() {
+  const sel = document.getElementById('exportOzonAccount');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = OZON_ACCOUNTS.length
+    ? '<option value="">— выберите кабинет —</option>'
+    : '<option value="">— нет подключённых кабинетов —</option>';
+  OZON_ACCOUNTS.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.name; opt.textContent = a.name;
+    sel.appendChild(opt);
+  });
+  if (cur && OZON_ACCOUNTS.some(a => a.name === cur)) sel.value = cur;
 }
 
 function onEntityChange(prefix) {
@@ -714,6 +973,7 @@ function onEntityChange(prefix) {
   const entity = code ? findEntity(code) : null;
   const df    = document.getElementById(prefix + 'DateField');
   const sec   = document.getElementById(prefix === 'export' ? 'dateSection' : 'schedDateSection');
+  const isOzon = entityProvider(code) === 'ozon';
 
   df.innerHTML = '';
 
@@ -729,7 +989,14 @@ function onEntityChange(prefix) {
     });
   }
 
-  if (prefix === 'export') loadEntityFilters(code || '');
+  if (prefix === 'export') {
+    if (isOzon) {
+      // Ozon: hide Bitrix-only filter section (no funnels/stages/fields discovery)
+      document.getElementById('filtersSection').style.display = 'none';
+    } else {
+      loadEntityFilters(code || '');
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1161,8 +1428,24 @@ function runExport() {
   const entity = v('exportEntity');
   if (!entity) { logError('Выберите сущность'); return; }
 
+  const provider = entityProvider(entity);
   const df = v('exportDateField'), start_date = v('exportStartDate'), end_date = v('exportEndDate');
   if (df && (!start_date || !end_date)) { logError('Укажите период выгрузки'); return; }
+
+  let url, body;
+  if (provider === 'ozon') {
+    const account = v('exportOzonAccount');
+    if (!account) { logError('Выберите кабинет Ozon (или добавьте на вкладке «Подключение»)'); return; }
+    url  = '/api/ozon/export-stream';
+    body = {account, entity, date_field: df, start_date, end_date};
+  } else {
+    url  = '/api/export-stream';
+    body = {provider: 'bitrix', entity, date_field: df, start_date, end_date};
+    const df_list  = collectDimensionsFilters();
+    const fld_list = collectSelectedFields();
+    if (df_list.length)  body.dimensions_filters = df_list;
+    if (fld_list.length) body.fields = fld_list;
+  }
 
   if (activeController) { activeController.abort(); activeController = null; }
 
@@ -1176,16 +1459,10 @@ function runExport() {
   document.getElementById('progressFooter').style.display = 'none';
   document.getElementById('exportProgress').style.display = 'block';
 
-  const body = {entity, date_field: df, start_date, end_date};
-  const df_list = collectDimensionsFilters();
-  const fld_list = collectSelectedFields();
-  if (df_list.length)  body.dimensions_filters = df_list;
-  if (fld_list.length) body.fields = fld_list;
-
   const controller = new AbortController();
   activeController = controller;
 
-  fetch('/api/export-stream', {
+  fetch(url, {
     method: 'POST', headers: json_h(), signal: controller.signal, body: JSON.stringify(body)
   }).then(async resp => {
     const reader = resp.body.getReader(), decoder = new TextDecoder();
@@ -1279,6 +1556,145 @@ function fmtDate(iso) {
 function num(n) { return Number(n).toLocaleString('ru-RU'); }
 
 // ═══════════════════════════════════════════════════════════════
+// Ozon accounts (multi-account management on Подключение page)
+// ═══════════════════════════════════════════════════════════════
+let OZON_ACCOUNTS = [];   // [{name, client_id, has_api_key, perf_client_id, has_perf_secret}]
+let OZON_ENTITIES_CAT = {}; // catalogue from /api/ozon/entities
+let _ozonModalEditingOriginalName = null;
+
+async function loadOzonAccounts() {
+  try {
+    OZON_ACCOUNTS = await fetch('/api/ozon/accounts').then(r => r.json());
+  } catch { OZON_ACCOUNTS = []; }
+  renderOzonAccountsList();
+  refreshOzonAccountSelects();
+}
+
+function renderOzonAccountsList() {
+  const wrap = document.getElementById('ozonAccountsList');
+  if (!wrap) return;
+  if (!OZON_ACCOUNTS.length) {
+    wrap.innerHTML = '<div class="manual-empty">Нет подключённых кабинетов. Нажмите «+ Добавить кабинет Ozon».</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  OZON_ACCOUNTS.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'ozon-acc-row';
+    row.innerHTML = `
+      <div class="ozon-acc-info">
+        <div class="ozon-acc-name">${escapeHtml(a.name)}</div>
+        <div class="ozon-acc-meta">
+          Client ID: <code>${escapeHtml(a.client_id || '—')}</code>
+          ${a.has_api_key ? '<span class="ozon-key-set">API Key ✓</span>' : '<span class="ozon-key-missing">API Key ✗</span>'}
+          ${a.has_perf_secret ? '<span class="ozon-key-set">Performance ✓</span>' : '<span class="ozon-key-missing">Performance —</span>'}
+        </div>
+      </div>
+      <div class="ozon-acc-actions">
+        <button class="btn btn-secondary btn-mini" type="button" onclick="testOzonAccount('${escapeHtml(a.name)}')">Проверить</button>
+        <button class="btn btn-secondary btn-mini" type="button" onclick="editOzonAccount('${escapeHtml(a.name)}')">Изменить</button>
+        <button class="btn btn-danger btn-mini" type="button" onclick="deleteOzonAccount('${escapeHtml(a.name)}')">Удалить</button>
+      </div>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+function addOzonAccount() {
+  _ozonModalEditingOriginalName = null;
+  document.getElementById('ozonModalTitle').textContent = 'Новый кабинет Ozon';
+  document.getElementById('ozonAccName').value = '';
+  document.getElementById('ozonAccClientId').value = '';
+  document.getElementById('ozonAccApiKey').value = '';
+  document.getElementById('ozonAccApiKey').placeholder = 'Длинный токен из Seller API';
+  document.getElementById('ozonAccPerfId').value = '';
+  document.getElementById('ozonAccPerfSecret').value = '';
+  document.getElementById('ozonAccPerfSecret').placeholder = 'Из Performance API (опционально)';
+  document.getElementById('ozonModalResult').textContent = '';
+  document.getElementById('ozonModalResult').className = 'result-msg';
+  document.getElementById('ozonAccountModal').style.display = 'flex';
+}
+
+async function editOzonAccount(name) {
+  try {
+    const a = await fetch('/api/ozon/accounts/' + encodeURIComponent(name)).then(r => r.json());
+    _ozonModalEditingOriginalName = name;
+    document.getElementById('ozonModalTitle').textContent = 'Редактирование: ' + name;
+    document.getElementById('ozonAccName').value = a.name || '';
+    document.getElementById('ozonAccClientId').value = a.client_id || '';
+    document.getElementById('ozonAccApiKey').value = '';
+    document.getElementById('ozonAccApiKey').placeholder = a.api_key ? '••• сохранено (введите новый, чтобы заменить)' : 'Не задан';
+    document.getElementById('ozonAccPerfId').value = a.perf_client_id || '';
+    document.getElementById('ozonAccPerfSecret').value = '';
+    document.getElementById('ozonAccPerfSecret').placeholder = a.perf_secret ? '••• сохранено' : 'Не задан';
+    document.getElementById('ozonModalResult').textContent = '';
+    document.getElementById('ozonModalResult').className = 'result-msg';
+    document.getElementById('ozonAccountModal').style.display = 'flex';
+  } catch (e) {
+    alert('Не удалось загрузить аккаунт: ' + e.message);
+  }
+}
+
+function closeOzonModal() {
+  document.getElementById('ozonAccountModal').style.display = 'none';
+}
+
+async function saveOzonAccount() {
+  const payload = {
+    name:           v('ozonAccName'),
+    client_id:      v('ozonAccClientId'),
+    api_key:        v('ozonAccApiKey'),
+    perf_client_id: v('ozonAccPerfId'),
+    perf_secret:    v('ozonAccPerfSecret'),
+  };
+  if (_ozonModalEditingOriginalName) payload.original_name = _ozonModalEditingOriginalName;
+
+  if (!payload.name) {
+    return showMsg('ozonModalResult', 'err', 'Введите название аккаунта');
+  }
+
+  const resp = await fetch('/api/ozon/accounts', {
+    method: 'POST', headers: json_h(), body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return showMsg('ozonModalResult', 'err', err.detail || 'Не удалось сохранить');
+  }
+  await loadOzonAccounts();
+  closeOzonModal();
+}
+
+async function deleteOzonAccount(name) {
+  if (!confirm(`Удалить кабинет «${name}»? Сохранённые конфигурации, ссылающиеся на него, перестанут работать.`)) return;
+  const resp = await fetch('/api/ozon/accounts/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return alert(err.detail || 'Не удалось удалить');
+  }
+  await loadOzonAccounts();
+}
+
+async function testOzonAccount(name) {
+  const r = await fetch('/api/ozon/test-connection', {
+    method: 'POST', headers: json_h(), body: JSON.stringify({name}),
+  }).then(r => r.json());
+  let msg = `[${name}] Seller API: ` + (r.seller ? '✅ работает' : '❌ ' + (r.seller_error || ''));
+  if ('perf' in r) {
+    msg += ' | Performance API: ' + (r.perf ? '✅' : '❌ ' + (r.perf_error || ''));
+  }
+  alert(msg);
+}
+
+async function testOzonAccountFromModal() {
+  // Save first, then test
+  await saveOzonAccount();
+  if (document.getElementById('ozonAccountModal').style.display === 'none') {
+    // saveOzonAccount closed it on success — find the saved name
+    await testOzonAccount(v('ozonAccName'));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Saved configurations
 // ═══════════════════════════════════════════════════════════════
 let SAVED_CONFIGS = [];
@@ -1328,15 +1744,22 @@ function renderConfigCheckboxList(containerId) {
     lbl.appendChild(cb);
     const ent = findEntity(cfg.entity);
     const entName = ent ? ent.name : (cfg.entity || '?');
+    const provider = cfg.provider || entityProvider(cfg.entity);
+    const provBadge = provider === 'ozon' ? 'Ozon' : 'B24';
+    const acctBit = (provider === 'ozon' && cfg.ozon_account) ? ` · ${cfg.ozon_account}` : '';
     const meta = [];
     if (cfg.date_field) meta.push(DATE_LABELS[cfg.date_field] || cfg.date_field);
     if (cfg.dimensions_filters && cfg.dimensions_filters.length) meta.push(`фильтров: ${cfg.dimensions_filters.length}`);
     if (cfg.fields && cfg.fields.length) meta.push(`полей: ${cfg.fields.length}`);
     const metaStr = meta.length ? ` — ${meta.join(', ')}` : '';
     lbl.appendChild(document.createTextNode(` ${cfg.name} `));
+    const provSpan = document.createElement('span');
+    provSpan.className = 'cfg-prov-badge cfg-prov-' + provider;
+    provSpan.textContent = provBadge;
+    lbl.appendChild(provSpan);
     const small = document.createElement('span');
     small.className = 'cfg-meta';
-    small.textContent = `[${entName}${metaStr}]`;
+    small.textContent = `[${entName}${acctBit}${metaStr}]`;
     lbl.appendChild(small);
     c.appendChild(lbl);
   });
@@ -1345,13 +1768,24 @@ function renderConfigCheckboxList(containerId) {
 function buildCurrentConfigPayload() {
   const entity = v('exportEntity');
   if (!entity) return null;
-  const payload = {
+  const provider = entityProvider(entity);
+  if (provider === 'ozon') {
+    return {
+      provider:           'ozon',
+      ozon_account:       v('exportOzonAccount'),
+      entity,
+      date_field:         v('exportDateField') || '',
+      dimensions_filters: [],
+      fields:             [],
+    };
+  }
+  return {
+    provider:           'bitrix',
     entity,
     date_field:         v('exportDateField') || '',
     dimensions_filters: collectDimensionsFilters(),
     fields:             collectSelectedFields(),
   };
-  return payload;
 }
 
 async function saveCurrentAsConfig() {
@@ -1434,22 +1868,43 @@ async function loadSelectedConfig() {
 }
 
 async function applyConfigToExportForm(cfg) {
+  const provider = cfg.provider || entityProvider(cfg.entity);
+  switchProvider(provider);
+
   const sel = document.getElementById('exportEntity');
+  // After switchProvider, the select is repopulated for the right provider
   sel.value = cfg.entity || '';
   if (sel.value !== (cfg.entity || '')) {
-    return showMsg('savedCfgMsg', 'err', `Сущность ${cfg.entity} не найдена в каталоге`);
+    return showMsg('savedCfgMsg', 'err', `Сущность ${cfg.entity} не найдена в каталоге провайдера ${provider}`);
   }
   LS.set('bi_export_entity', cfg.entity);
-  // Trigger entity change to populate date fields and load filters
+
+  if (provider === 'ozon') {
+    // Set Ozon account
+    const accSel = document.getElementById('exportOzonAccount');
+    if (cfg.ozon_account) accSel.value = cfg.ozon_account;
+    // Date field
+    const ent = findEntity(cfg.entity);
+    document.getElementById('dateSection').style.display =
+      (ent && ent.date_fields && ent.date_fields.length) ? '' : 'none';
+    onEntityChange('export');
+    if (cfg.date_field) {
+      const dfSel = document.getElementById('exportDateField');
+      if (dfSel && Array.from(dfSel.options).some(o => o.value === cfg.date_field)) {
+        dfSel.value = cfg.date_field;
+      }
+    }
+    return;
+  }
+
+  // Bitrix flow
   await loadEntityFiltersAwait(cfg.entity || '');
-  // Date field
   if (cfg.date_field) {
     const dfSel = document.getElementById('exportDateField');
     if (dfSel && Array.from(dfSel.options).some(o => o.value === cfg.date_field)) {
       dfSel.value = cfg.date_field;
     }
   }
-  // Apply filters and fields to UI
   applyDimensionsFiltersToUI('funnelsList', 'stagesList', cfg.dimensions_filters || []);
   applyFieldsToUI('fieldsList', 'fieldsRuList', cfg.fields || []);
   saveCheckboxState('funnelsList');
@@ -1704,9 +2159,11 @@ function buildCheckGroup(title, listId, items, selectedSet) {
 function collectManualJobsFromUI() {
   return manualSelectedJobs.map((job, idx) => {
     const out = {
-      name:       job.name,
-      entity:     job.entity,
-      date_field: job.date_field || '',
+      name:         job.name,
+      provider:     job.provider || 'bitrix',
+      ozon_account: job.ozon_account || '',
+      entity:       job.entity,
+      date_field:   job.date_field || '',
     };
     // Filters from card editor (if loaded). Otherwise use saved values.
     const funListId = `mcFun_${idx}`;
@@ -2204,10 +2661,22 @@ async function applyRecChanges(idx) {
 let HISTORY_ITEMS = [];
 
 const HIST_SOURCE_LABELS = {
-  manual_form:    { label: 'Отправка',     icon: '📤', cls: 'hist-src-form'  },
-  manual_batch:   { label: 'Ручная',       icon: '📦', cls: 'hist-src-batch' },
-  schedule:       { label: 'Расписание',   icon: '⏰', cls: 'hist-src-sched' },
-  reconciliation: { label: 'Сверка',       icon: '🔄', cls: 'hist-src-rec'   },
+  manual_form: {
+    label: 'Отправка',  cls: 'hist-src-form',
+    svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>',
+  },
+  manual_batch: {
+    label: 'Ручная',    cls: 'hist-src-batch',
+    svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4 5v6c0 5.55 3.84 10.74 8 11 4.16-.26 8-5.45 8-11V5l-8-3zM10 17l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>',
+  },
+  schedule: {
+    label: 'Расписание', cls: 'hist-src-sched',
+    svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>',
+  },
+  reconciliation: {
+    label: 'Сверка',    cls: 'hist-src-rec',
+    svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
+  },
 };
 
 async function loadHistory() {
@@ -2262,36 +2731,40 @@ function renderHistory() {
 }
 
 function renderHistoryRow(it) {
-  const src = HIST_SOURCE_LABELS[it.source] || { label: it.source, icon: '•', cls: '' };
+  const src = HIST_SOURCE_LABELS[it.source] || { label: it.source, svg: '', cls: '' };
   const dt = formatHistDate(it.started_at);
-  const statusIcon = it.status === 'ok' ? '✅' : '❌';
+  const statusSvg = it.status === 'ok'
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
   const dur = it.duration_sec != null ? formatDuration(it.duration_sec) : '';
   const dateRange = (it.start_date && it.end_date)
-    ? `${fmtDate(it.start_date)}—${fmtDate(it.end_date)}`
+    ? `${fmtDate(it.start_date)} — ${fmtDate(it.end_date)}`
     : (it.start_date ? fmtDate(it.start_date) : '—');
   const cfgBadge = it.config_name
     ? `<span class="hist-cfg" title="Конфигурация">${escapeHtml(it.config_name)}</span>` : '';
   const filtersCount = (it.dimensions_filters || []).length;
   const fieldsCount  = (it.fields || []).length;
   const extras = [];
-  if (filtersCount) extras.push(`${filtersCount} фильтр${filtersCount === 1 ? '' : 'а'}`);
-  if (fieldsCount)  extras.push(`${fieldsCount} пол${fieldsCount === 1 ? 'е' : 'ей'}`);
-  const extraStr = extras.length ? ` · ${extras.join(' · ')}` : '';
+  if (filtersCount) extras.push(`${filtersCount} ф.`);
+  if (fieldsCount)  extras.push(`${fieldsCount} п.`);
 
   const wrap = document.createElement('div');
   wrap.className = 'hist-row hist-' + (it.status === 'error' ? 'err' : 'ok');
 
+  const rowsCell = `<span class="hist-rows-count" title="строк за выгрузку">${num(it.rows || 0)}</span>${dur ? `<span class="hist-dur">${escapeHtml(dur)}</span>` : ''}`;
+
   wrap.innerHTML = `
     <div class="hist-summary" onclick="this.parentElement.classList.toggle('expanded')">
-      <span class="hist-status">${statusIcon}</span>
+      <span class="hist-status">${statusSvg}</span>
       <span class="hist-time">${dt}</span>
-      <span class="hist-src-badge ${src.cls}">${src.icon} ${escapeHtml(src.label)}</span>
-      ${cfgBadge}
+      <span class="hist-src-badge ${src.cls}">
+        <span class="hist-src-icon">${src.svg}</span>${escapeHtml(src.label)}
+      </span>
+      <span class="hist-cfg-cell">${cfgBadge}</span>
       <span class="hist-entity-name" title="${escapeHtml(it.entity || '')}">${escapeHtml(it.entity_name || it.entity || '—')}</span>
       <span class="hist-period">${dateRange}</span>
-      <span class="hist-rows-count" title="строк">${num(it.rows || 0)}</span>
-      <span class="hist-extras">${escapeHtml(dur)}${extraStr}</span>
-      <span class="hist-toggle">▾</span>
+      <span class="hist-rows-cell">${rowsCell}</span>
+      <span class="hist-toggle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg></span>
     </div>
     <div class="hist-details">
       ${renderHistoryDetails(it)}
