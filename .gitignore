@@ -1,6 +1,9 @@
 # Credentials — never commit this
 config.json
 
+# Local export history (may contain sensitive entity data)
+history.json
+
 # Python
 __pycache__/
 *.pyc

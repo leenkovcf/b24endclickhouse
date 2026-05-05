@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
 
@@ -35,6 +35,18 @@
     <div class="nav-item active" data-page="export">
       <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
       Отправка данных
+    </div>
+    <div class="nav-item" data-page="manual">
+      <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+      Ручная отправка
+    </div>
+    <div class="nav-item" data-page="reconcile">
+      <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+      Сверка данных
+    </div>
+    <div class="nav-item" data-page="history">
+      <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+      История
     </div>
     <div class="nav-item" data-page="settings">
       <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.02 7.02 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.04.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
@@ -65,6 +77,35 @@
       <div id="export-conn-badge" class="conn-badge unk">
         <div class="conn-dot"></div>
         <span>Проверка подключения...</span>
+      </div>
+
+      <div class="saved-configs-panel">
+        <div class="form-group">
+          <label class="form-label">Сохранённые конфигурации</label>
+          <div class="sc-row">
+            <select id="loadConfigSelect" class="form-control">
+              <option value="">— выбрать конфигурацию для загрузки —</option>
+            </select>
+            <button class="btn btn-secondary sc-btn" type="button"
+                    onclick="loadSelectedConfig()">Загрузить</button>
+            <button class="btn btn-secondary sc-btn" type="button"
+                    onclick="renameSelectedConfig()">Переименовать</button>
+            <button class="btn btn-danger sc-btn" type="button"
+                    onclick="deleteSelectedConfig()">Удалить</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Сохранить текущие настройки как новую конфигурацию</label>
+          <div class="sc-row">
+            <input type="text" id="newConfigName" class="form-control"
+                   placeholder="Название (например: Сделки воронка №1, поля A/B/C)">
+            <button class="btn btn-primary sc-btn" type="button"
+                    onclick="saveCurrentAsConfig()">Сохранить</button>
+            <button class="btn btn-secondary sc-btn" type="button"
+                    onclick="overwriteSelectedConfig()" title="Перезаписать выбранную выше конфигурацию">Перезаписать выбранную</button>
+          </div>
+        </div>
+        <div id="savedCfgMsg" class="result-msg"></div>
       </div>
 
       <div class="form-group">
@@ -166,6 +207,168 @@
     </div>
   </div>
 
+  <!-- ── Manual page ───────────────────────────────────────────── -->
+  <div class="page" id="page-manual">
+    <div class="page-header">
+      <div class="page-title">Ручная отправка</div>
+      <div class="page-subtitle">Выберите несколько сохранённых конфигураций и запустите выгрузку по очереди</div>
+    </div>
+
+    <div class="card">
+      <div id="manual-conn-badge" class="conn-badge unk">
+        <div class="conn-dot"></div>
+        <span>Проверка подключения...</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          Сохранённые конфигурации
+          <span class="sel-btns">
+            <a onclick="checkAll('manualConfigsList',true)">Все</a> /
+            <a onclick="checkAll('manualConfigsList',false)">Снять</a>
+          </span>
+        </label>
+        <div id="manualConfigsList" class="checkbox-group manual-configs-list">
+          <div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Период выгрузки (применяется ко всем выбранным конфигурациям)</label>
+        <div class="date-row">
+          <input type="date" id="manualStartDate" class="form-control">
+          <input type="date" id="manualEndDate" class="form-control">
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:5px">
+          Если у конфигурации не указан тип даты — выгрузка идёт без фильтра по дате.
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" type="button" onclick="loadManualSelection()">
+          Выбрать
+        </button>
+        <button class="btn btn-primary" id="btnManualRun" type="button"
+                onclick="runManualBatch()" disabled>
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M8 5v14l11-7z"/></svg>
+          Запустить выгрузку
+        </button>
+      </div>
+
+      <div id="manualReview" class="manual-review" style="display:none"></div>
+
+      <div id="manualProgress" class="export-progress" style="display:none">
+        <div class="progress-header">
+          <span id="manualStatusLabel">Готов к запуску</span>
+          <span id="manualTotalLabel">0 строк</span>
+        </div>
+        <div id="manualLog" class="progress-log"></div>
+        <div class="progress-footer" id="manualFooter" style="display:none">
+          <span id="manualSummary"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Reconciliation page ───────────────────────────────────── -->
+  <div class="page" id="page-reconcile">
+    <div class="page-header">
+      <div class="page-title">Сверка данных</div>
+      <div class="page-subtitle">Проверка изменений в Bitrix24 и обновление ClickHouse (по полю даты изменения)</div>
+    </div>
+
+    <div class="card">
+      <div id="reconcile-conn-badge" class="conn-badge unk">
+        <div class="conn-dot"></div>
+        <span>Проверка подключения...</span>
+      </div>
+
+      <div class="sched-note">
+        <strong>Как работает:</strong> для каждой выбранной конфигурации выгружаются данные из Bitrix24 за указанный период по полю <em>даты изменения</em> (DATE_MODIFY / CHANGED_DATE), затем сравниваются с тем, что уже есть в ClickHouse по полю <code>ID</code>.<br>
+        Показывается сводка изменений и предложение их применить.<br>
+        ⚠ <strong>Удалённые в Bitrix24 записи не обнаруживаются</strong> — их даты изменения уже не приходят. Удаления нужно обрабатывать отдельно.<br>
+        Сущности без поля <code>ID</code> (истории статусов, связи) пропускаются.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          Сохранённые конфигурации
+          <span class="sel-btns">
+            <a onclick="checkAll('reconcileConfigsList',true)">Все</a> /
+            <a onclick="checkAll('reconcileConfigsList',false)">Снять</a>
+          </span>
+        </label>
+        <div id="reconcileConfigsList" class="checkbox-group manual-configs-list">
+          <div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Период по дате изменения</label>
+        <div class="date-row">
+          <input type="date" id="reconcileStartDate" class="form-control">
+          <input type="date" id="reconcileEndDate" class="form-control">
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnReconcileCheck" type="button"
+                onclick="runReconcileCheck()">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M19 3H5c-1.1 0-1.99.9-1.99 2L3 19c0 1.1.89 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          Проверить изменения
+        </button>
+      </div>
+
+      <div id="reconcileProgress" class="export-progress" style="display:none">
+        <div class="progress-header">
+          <span id="reconcileStatusLabel">Проверка...</span>
+        </div>
+        <div id="reconcileLog" class="progress-log"></div>
+      </div>
+
+      <div id="reconcileResults" class="manual-review" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- ── History page ──────────────────────────────────────────── -->
+  <div class="page" id="page-history">
+    <div class="page-header">
+      <div class="page-title">История выгрузок</div>
+      <div class="page-subtitle">Все запуски: ручные, по расписанию, ручная отправка, сверка</div>
+    </div>
+
+    <div class="card">
+      <div class="hist-toolbar">
+        <div class="hist-filters">
+          <select id="histSourceFilter" class="form-control hist-filter-control">
+            <option value="">Все источники</option>
+            <option value="manual_form">Отправка данных</option>
+            <option value="manual_batch">Ручная отправка</option>
+            <option value="schedule">Расписание</option>
+            <option value="reconciliation">Сверка</option>
+          </select>
+          <select id="histStatusFilter" class="form-control hist-filter-control">
+            <option value="">Все статусы</option>
+            <option value="ok">✅ Успешно</option>
+            <option value="error">❌ С ошибкой</option>
+          </select>
+          <input type="text" id="histSearch" class="form-control hist-filter-control"
+                 placeholder="Поиск по названию сущности или конфига...">
+        </div>
+        <div class="hist-actions">
+          <button class="btn btn-secondary" type="button" onclick="loadHistory()">⟳ Обновить</button>
+          <button class="btn btn-danger" type="button" onclick="clearHistory()">Очистить историю</button>
+        </div>
+      </div>
+
+      <div id="histStats" class="hist-stats"></div>
+
+      <div id="histList" class="hist-list">
+        <div class="manual-empty">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Settings page ─────────────────────────────────────────── -->
   <div class="page" id="page-settings">
     <div class="page-header">
@@ -259,12 +462,12 @@
       </div>
 
       <div class="sched-note">
-        <strong>Как работает:</strong> В указанное время приложение выгружает данные за последние <em>N дней назад</em> в ClickHouse.
+        <strong>Как работает:</strong> В указанное время приложение выгружает данные за последние <em>N дней назад</em> в ClickHouse — по очереди для каждой выбранной сохранённой конфигурации.
         Глубина выгрузки задаётся ниже — по умолчанию 1 день для ежедневной, 7 для еженедельной, 30 для ежемесячной.<br>
         <strong>Ежедневно</strong> — каждый день в указанное время.
         <strong>Еженедельно</strong> — каждый понедельник.
         <strong>Ежемесячно</strong> — 1-го числа каждого месяца.<br>
-        Все фильтры (воронки, стадии, поля) сохраняются вместе с расписанием и применяются при каждом запуске.<br>
+        Сначала создайте конфигурации на вкладке «Отправка данных» (с нужными воронками, стадиями и полями) — затем выберите их здесь.<br>
         ⚠ <strong>Расписание активно только пока приложение запущено.</strong>
       </div>
 
@@ -284,75 +487,23 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">Сущность</label>
-        <select id="schedEntity" class="form-control">
-          <option value="">— выберите сущность —</option>
-        </select>
+        <label class="form-label">
+          Глубина выгрузки (дней назад)
+          <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0"> — сколько дней назад от момента запуска включать в выгрузку</span>
+        </label>
+        <input type="number" id="schedDaysBack" class="form-control" value="1" min="1" max="365">
       </div>
 
-      <div id="schedDateSection">
-        <div class="form-group">
-          <label class="form-label">Тип даты</label>
-          <select id="schedDateField" class="form-control"></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">
-            Глубина выгрузки (дней назад)
-            <span style="font-weight:400;color:var(--text-3);text-transform:none;letter-spacing:0"> — сколько дней назад от момента запуска включать в выгрузку</span>
-          </label>
-          <input type="number" id="schedDaysBack" class="form-control" value="1" min="1" max="365">
-        </div>
-      </div>
-
-      <!-- Schedule filters -->
-      <div id="sFiltersSection" style="display:none">
-        <div class="filters-header">
-          <span class="filters-title">Фильтры</span>
-          <span id="sFiltersLoading" class="filters-loading" style="display:none">загрузка...</span>
-        </div>
-        <div class="filters-row">
-          <div id="sFunnelsGroup" style="display:none;flex:1;min-width:0">
-            <label class="form-label">Воронки
-              <span class="sel-btns">
-                <a onclick="checkAll('sFunnelsList',true)">Все</a> /
-                <a onclick="checkAll('sFunnelsList',false)">Снять</a>
-              </span>
-            </label>
-            <div id="sFunnelsList" class="checkbox-group"></div>
-          </div>
-          <div id="sStagesGroup" style="display:none;flex:1;min-width:0">
-            <label class="form-label">Стадии
-              <span class="sel-btns">
-                <a onclick="checkAll('sStagesList',true)">Все</a> /
-                <a onclick="checkAll('sStagesList',false)">Снять</a>
-              </span>
-            </label>
-            <div id="sStagesList" class="checkbox-group"></div>
-          </div>
-        </div>
-        <div id="sFieldsGroup" style="display:none">
-          <div class="fields-search-row">
-            <input type="text" id="sFieldsSearch" class="fields-search-input"
-                   placeholder="Поиск по полям..." oninput="filterSchedFields(this.value)">
-            <span id="sFieldsCount" class="fields-count"></span>
-          </div>
-          <div id="sFieldsRuGroup" style="display:none">
-            <label class="form-label">Поля (русское название)
-              <span class="sel-btns">
-                <a onclick="checkAllSchedFields(true)">Все</a> /
-                <a onclick="checkAllSchedFields(false)">Снять</a>
-              </span>
-            </label>
-            <div id="sFieldsRuList" class="checkbox-grid"></div>
-          </div>
-          <label class="form-label">
-            <span id="sFieldsOrigTitle">Поля для выгрузки</span>
-            <span class="sel-btns">
-              <a onclick="checkAllSchedFields(true)">Все</a> /
-              <a onclick="checkAllSchedFields(false)">Снять</a>
-            </span>
-          </label>
-          <div id="sFieldsList" class="checkbox-grid"></div>
+      <div class="form-group">
+        <label class="form-label">
+          Сохранённые конфигурации для выгрузки
+          <span class="sel-btns">
+            <a onclick="checkAll('schedConfigsList',true)">Все</a> /
+            <a onclick="checkAll('schedConfigsList',false)">Снять</a>
+          </span>
+        </label>
+        <div id="schedConfigsList" class="checkbox-group manual-configs-list">
+          <div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>
         </div>
       </div>
 
@@ -458,6 +609,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     item.classList.add('active');
     document.getElementById('page-' + item.dataset.page).classList.add('active');
+    if (item.dataset.page === 'history') loadHistory();
   });
 });
 
@@ -471,7 +623,6 @@ async function boot() {
   ]);
 
   fillEntitySelect('exportEntity');
-  fillEntitySelect('schedEntity');
 
   // Save entity on change + restore date field pref
   document.getElementById('exportEntity').addEventListener('change', () => {
@@ -480,10 +631,6 @@ async function boot() {
   });
   document.getElementById('exportDateField').addEventListener('change', () => {
     if (currentFilterEntity) LS.set(`bi_date_field_${currentFilterEntity}`, v('exportDateField'));
-  });
-  document.getElementById('schedEntity').addEventListener('change', async () => {
-    onEntityChange('sched');
-    await loadSchedFilters(v('schedEntity'));
   });
   document.getElementById('schedFreq').addEventListener('change', () => {
     const daysMap = { daily: 1, weekly: 7, monthly: 30 };
@@ -502,7 +649,25 @@ async function boot() {
   document.getElementById('exportEndDate').addEventListener('change', () =>
     LS.set('bi_end_date', v('exportEndDate')));
 
+  // Manual page default dates
+  document.getElementById('manualStartDate').value = LS.get('bi_manual_start') || fmt(firstDay);
+  document.getElementById('manualEndDate').value   = LS.get('bi_manual_end')   || fmt(today);
+  document.getElementById('manualStartDate').addEventListener('change', () =>
+    LS.set('bi_manual_start', v('manualStartDate')));
+  document.getElementById('manualEndDate').addEventListener('change', () =>
+    LS.set('bi_manual_end', v('manualEndDate')));
+
+  // Reconcile page default dates: last 7 days
+  const sevenAgo = new Date(today.getTime() - 7 * 24 * 3600 * 1000);
+  document.getElementById('reconcileStartDate').value = LS.get('bi_reconcile_start') || fmt(sevenAgo);
+  document.getElementById('reconcileEndDate').value   = LS.get('bi_reconcile_end')   || fmt(today);
+  document.getElementById('reconcileStartDate').addEventListener('change', () =>
+    LS.set('bi_reconcile_start', v('reconcileStartDate')));
+  document.getElementById('reconcileEndDate').addEventListener('change', () =>
+    LS.set('bi_reconcile_end', v('reconcileEndDate')));
+
   await loadSettings();
+  await loadSavedConfigs();
   await loadSchedule();
   await refreshConnectionBadges();
 
@@ -660,7 +825,7 @@ function collectCustomEntities() {
 }
 
 function refreshCustomOptions(customs) {
-  ['exportEntity', 'schedEntity'].forEach(selId => {
+  ['exportEntity'].forEach(selId => {
     const sel = document.getElementById(selId);
     // Remove old custom group if any
     const old = sel.querySelector('optgroup[data-custom="1"]');
@@ -713,7 +878,7 @@ async function refreshConnectionBadges() {
       ? 'Подключение работает'
       : 'Ошибка подключения — проверьте настройки';
 
-  ['export-conn-badge', 'sched-conn-badge'].forEach(id => {
+  ['export-conn-badge', 'sched-conn-badge', 'manual-conn-badge', 'reconcile-conn-badge'].forEach(id => {
     const el = document.getElementById(id);
     el.className = 'conn-badge ' + cls;
     el.querySelector('span').textContent = txt;
@@ -1114,49 +1279,255 @@ function fmtDate(iso) {
 function num(n) { return Number(n).toLocaleString('ru-RU'); }
 
 // ═══════════════════════════════════════════════════════════════
-// Schedule
+// Saved configurations
+// ═══════════════════════════════════════════════════════════════
+let SAVED_CONFIGS = [];
+
+async function loadSavedConfigs() {
+  SAVED_CONFIGS = await fetch('/api/saved-configs').then(r => r.json()).catch(() => []);
+  refreshSavedConfigsUI();
+}
+
+function refreshSavedConfigsUI() {
+  // Dropdown on Export tab
+  const dd = document.getElementById('loadConfigSelect');
+  if (dd) {
+    const cur = dd.value;
+    dd.innerHTML = '<option value="">— выбрать конфигурацию для загрузки —</option>';
+    SAVED_CONFIGS.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      dd.appendChild(opt);
+    });
+    if (cur && SAVED_CONFIGS.some(c => c.name === cur)) dd.value = cur;
+  }
+  // Manual page checkbox list
+  renderConfigCheckboxList('manualConfigsList');
+  // Schedule page checkbox list
+  renderConfigCheckboxList('schedConfigsList');
+  // Reconcile page checkbox list
+  renderConfigCheckboxList('reconcileConfigsList');
+}
+
+function renderConfigCheckboxList(containerId) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const prev = {};
+  c.querySelectorAll('input').forEach(cb => { prev[cb.value] = cb.checked; });
+  c.innerHTML = '';
+  if (!SAVED_CONFIGS.length) {
+    c.innerHTML = '<div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>';
+    return;
+  }
+  SAVED_CONFIGS.forEach(cfg => {
+    const lbl = document.createElement('label');
+    lbl.className = 'checkbox-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = cfg.name;
+    cb.checked = cfg.name in prev ? prev[cfg.name] : false;
+    lbl.appendChild(cb);
+    const ent = findEntity(cfg.entity);
+    const entName = ent ? ent.name : (cfg.entity || '?');
+    const meta = [];
+    if (cfg.date_field) meta.push(DATE_LABELS[cfg.date_field] || cfg.date_field);
+    if (cfg.dimensions_filters && cfg.dimensions_filters.length) meta.push(`фильтров: ${cfg.dimensions_filters.length}`);
+    if (cfg.fields && cfg.fields.length) meta.push(`полей: ${cfg.fields.length}`);
+    const metaStr = meta.length ? ` — ${meta.join(', ')}` : '';
+    lbl.appendChild(document.createTextNode(` ${cfg.name} `));
+    const small = document.createElement('span');
+    small.className = 'cfg-meta';
+    small.textContent = `[${entName}${metaStr}]`;
+    lbl.appendChild(small);
+    c.appendChild(lbl);
+  });
+}
+
+function buildCurrentConfigPayload() {
+  const entity = v('exportEntity');
+  if (!entity) return null;
+  const payload = {
+    entity,
+    date_field:         v('exportDateField') || '',
+    dimensions_filters: collectDimensionsFilters(),
+    fields:             collectSelectedFields(),
+  };
+  return payload;
+}
+
+async function saveCurrentAsConfig() {
+  const name = v('newConfigName');
+  if (!name) return showMsg('savedCfgMsg', 'err', 'Введите название конфигурации');
+  const payload = buildCurrentConfigPayload();
+  if (!payload) return showMsg('savedCfgMsg', 'err', 'Сначала выберите сущность');
+  payload.name = name;
+  const resp = await fetch('/api/saved-configs', {
+    method: 'POST', headers: json_h(), body: JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return showMsg('savedCfgMsg', 'err', err.detail || 'Не удалось сохранить');
+  }
+  document.getElementById('newConfigName').value = '';
+  await loadSavedConfigs();
+  document.getElementById('loadConfigSelect').value = name;
+  showMsg('savedCfgMsg', 'ok', `Конфигурация «${name}» сохранена`);
+}
+
+async function overwriteSelectedConfig() {
+  const name = document.getElementById('loadConfigSelect').value;
+  if (!name) return showMsg('savedCfgMsg', 'err', 'Сначала выберите конфигурацию для перезаписи');
+  const payload = buildCurrentConfigPayload();
+  if (!payload) return showMsg('savedCfgMsg', 'err', 'Сначала выберите сущность');
+  if (!confirm(`Перезаписать конфигурацию «${name}» текущими настройками?`)) return;
+  const resp = await fetch(`/api/saved-configs/${encodeURIComponent(name)}`, {
+    method: 'PUT', headers: json_h(), body: JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return showMsg('savedCfgMsg', 'err', err.detail || 'Не удалось перезаписать');
+  }
+  await loadSavedConfigs();
+  document.getElementById('loadConfigSelect').value = name;
+  showMsg('savedCfgMsg', 'ok', `Конфигурация «${name}» обновлена`);
+}
+
+async function renameSelectedConfig() {
+  const name = document.getElementById('loadConfigSelect').value;
+  if (!name) return showMsg('savedCfgMsg', 'err', 'Сначала выберите конфигурацию');
+  const newName = prompt('Новое название:', name);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === name) return;
+  const resp = await fetch(`/api/saved-configs/${encodeURIComponent(name)}/rename`, {
+    method: 'POST', headers: json_h(), body: JSON.stringify({new_name: trimmed})
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return showMsg('savedCfgMsg', 'err', err.detail || 'Не удалось переименовать');
+  }
+  await loadSavedConfigs();
+  document.getElementById('loadConfigSelect').value = trimmed;
+  showMsg('savedCfgMsg', 'ok', `Переименована в «${trimmed}»`);
+}
+
+async function deleteSelectedConfig() {
+  const name = document.getElementById('loadConfigSelect').value;
+  if (!name) return showMsg('savedCfgMsg', 'err', 'Сначала выберите конфигурацию');
+  if (!confirm(`Удалить конфигурацию «${name}»? Также удалится из расписания если использовалась.`)) return;
+  const resp = await fetch(`/api/saved-configs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return showMsg('savedCfgMsg', 'err', err.detail || 'Не удалось удалить');
+  }
+  await loadSavedConfigs();
+  await loadSchedule();
+  showMsg('savedCfgMsg', 'ok', `Конфигурация «${name}» удалена`);
+}
+
+async function loadSelectedConfig() {
+  const name = document.getElementById('loadConfigSelect').value;
+  if (!name) return showMsg('savedCfgMsg', 'err', 'Сначала выберите конфигурацию');
+  const cfg = SAVED_CONFIGS.find(c => c.name === name);
+  if (!cfg) return showMsg('savedCfgMsg', 'err', 'Конфигурация не найдена');
+  await applyConfigToExportForm(cfg);
+  showMsg('savedCfgMsg', 'ok', `Загружена «${name}»`);
+}
+
+async function applyConfigToExportForm(cfg) {
+  const sel = document.getElementById('exportEntity');
+  sel.value = cfg.entity || '';
+  if (sel.value !== (cfg.entity || '')) {
+    return showMsg('savedCfgMsg', 'err', `Сущность ${cfg.entity} не найдена в каталоге`);
+  }
+  LS.set('bi_export_entity', cfg.entity);
+  // Trigger entity change to populate date fields and load filters
+  await loadEntityFiltersAwait(cfg.entity || '');
+  // Date field
+  if (cfg.date_field) {
+    const dfSel = document.getElementById('exportDateField');
+    if (dfSel && Array.from(dfSel.options).some(o => o.value === cfg.date_field)) {
+      dfSel.value = cfg.date_field;
+    }
+  }
+  // Apply filters and fields to UI
+  applyDimensionsFiltersToUI('funnelsList', 'stagesList', cfg.dimensions_filters || []);
+  applyFieldsToUI('fieldsList', 'fieldsRuList', cfg.fields || []);
+  saveCheckboxState('funnelsList');
+  saveCheckboxState('stagesList');
+  saveCheckboxState('fieldsList');
+  updateFieldsCount();
+}
+
+// Re-implementation of onEntityChange logic inline (need to await filters load)
+async function loadEntityFiltersAwait(entity) {
+  const code  = entity;
+  const ent   = code ? findEntity(code) : null;
+  const df    = document.getElementById('exportDateField');
+  const sec   = document.getElementById('dateSection');
+  df.innerHTML = '';
+  if (!ent || ent.date_fields.length === 0) {
+    sec.style.display = 'none';
+  } else {
+    sec.style.display = '';
+    ent.date_fields.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f; opt.textContent = DATE_LABELS[f] || f;
+      df.appendChild(opt);
+    });
+  }
+  await loadEntityFilters(code || '');
+}
+
+function applyDimensionsFiltersToUI(funnelsId, stagesId, filters) {
+  // No filters saved → leave all checked (default)
+  const byField = {};
+  (filters || []).forEach(f => byField[f.fieldName] = new Set(f.values || []));
+  const cat = byField['CATEGORY_ID'];
+  if (cat) {
+    document.querySelectorAll(`#${funnelsId} input`).forEach(cb => cb.checked = cat.has(cb.value));
+  }
+  const stg = byField['STAGE_ID'];
+  if (stg) {
+    document.querySelectorAll(`#${stagesId} input`).forEach(cb => cb.checked = stg.has(cb.value));
+  }
+}
+
+function applyFieldsToUI(origId, ruId, fields) {
+  if (!fields || !fields.length) return; // empty = "all fields"
+  const set = new Set(fields);
+  document.querySelectorAll(`#${origId} input`).forEach(cb => cb.checked = set.has(cb.value));
+  document.querySelectorAll(`#${ruId} input`).forEach(cb => cb.checked = set.has(cb.value));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Schedule (multi-config)
 // ═══════════════════════════════════════════════════════════════
 async function loadSchedule() {
   const sch = await fetch('/api/schedule').then(r => r.json());
-  if (!sch || !sch.entity) return;
+  if (!sch) return;
 
   if (sch.frequency) document.getElementById('schedFreq').value = sch.frequency;
   if (sch.time_msk)  document.getElementById('schedTime').value  = sch.time_msk;
   if (sch.days_back) document.getElementById('schedDaysBack').value = sch.days_back;
 
-  const sel = document.getElementById('schedEntity');
-  sel.value = sch.entity || '';
-  onEntityChange('sched');
+  const selected = new Set(sch.configs || []);
+  document.querySelectorAll('#schedConfigsList input').forEach(cb => {
+    cb.checked = selected.has(cb.value);
+  });
 
-  if (sch.date_field) {
-    setTimeout(() => { document.getElementById('schedDateField').value = sch.date_field; }, 50);
-  }
-
-  await loadSchedFilters(sch.entity);
-  if (sch.dimensions_filters) restoreSchedDimensionsFilters(sch.dimensions_filters);
-  if (sch.fields) restoreSchedFields(sch.fields);
-
-  updateSchedInfo(sch);
+  if (sch.enabled) updateSchedInfo(sch);
 }
 
 async function saveSchedule() {
-  const entity = v('schedEntity');
-  if (!entity) return showMsg('schedResult', 'err', 'Выберите сущность');
-
+  const configs = getCheckedValues('schedConfigsList');
+  if (!configs.length) return showMsg('schedResult', 'err', 'Выберите хотя бы одну сохранённую конфигурацию');
   const payload = {
-    enabled:    true,
-    frequency:  v('schedFreq'),
-    time_msk:   v('schedTime') || '00:01',
-    entity,
-    date_field: v('schedDateField') || '',
-    days_back:  +v('schedDaysBack') || 1,
+    enabled:   true,
+    frequency: v('schedFreq'),
+    time_msk:  v('schedTime') || '00:01',
+    days_back: +v('schedDaysBack') || 1,
+    configs,
   };
-
-  const df_list  = collectSchedDimensionsFilters();
-  const fld_list = collectSchedSelectedFields();
-  if (df_list.length)  payload.dimensions_filters = df_list;
-  if (fld_list.length) payload.fields = fld_list;
-
   await fetch('/api/schedule', { method: 'POST', headers: json_h(), body: JSON.stringify(payload) });
   showMsg('schedResult', 'ok', 'Расписание сохранено');
   updateSchedInfo(payload);
@@ -1170,188 +1541,859 @@ async function stopSchedule() {
 
 function updateSchedInfo(sch) {
   if (!sch.enabled) return;
-  const freqLabel = {
-    daily:   'Ежедневно',
-    weekly:  'Еженедельно (пн)',
-    monthly: 'Ежемесячно (1-го)',
-  }[sch.frequency] || sch.frequency;
+  const freqLabel = SCHED_LABELS[sch.frequency] || sch.frequency;
   const timePart = sch.time_msk ? ` в ${sch.time_msk} МСК` : '';
-  const entity   = findEntity(sch.entity);
-  const name     = entity ? entity.name : sch.entity;
+  const cfgList = (sch.configs || []).join(', ') || '—';
   document.getElementById('schedCurrent').textContent =
-    `${freqLabel}${timePart} | Сущность: ${name} | Глубина: ${sch.days_back} дн.`;
+    `${freqLabel}${timePart} | Глубина: ${sch.days_back} дн. | Конфигурации: ${cfgList}`;
 }
 
-// ─── Schedule filters ─────────────────────────────────────────
-async function loadSchedFilters(entity) {
-  currentSchedEntity = entity;
-  const sec     = document.getElementById('sFiltersSection');
-  const loading = document.getElementById('sFiltersLoading');
+const SCHED_LABELS = {
+  daily:   'Ежедневно',
+  weekly:  'Еженедельно (пн)',
+  monthly: 'Ежемесячно (1-го)',
+};
 
-  ['sFunnelsGroup','sStagesGroup','sFieldsGroup','sFieldsRuGroup'].forEach(id =>
-    document.getElementById(id).style.display = 'none');
-  ['sFunnelsList','sStagesList','sFieldsList','sFieldsRuList'].forEach(id =>
-    document.getElementById(id).innerHTML = '');
-  document.getElementById('sFieldsOrigTitle').textContent = 'Поля для выгрузки';
+// ═══════════════════════════════════════════════════════════════
+// Manual batch
+// ═══════════════════════════════════════════════════════════════
+let manualSelectedJobs = []; // [{name, entity, date_field, dimensions_filters, fields}]
+let manualController = null;
 
-  if (!entity) { sec.style.display = 'none'; return; }
-  sec.style.display = 'block';
-  loading.style.display = 'inline';
+function loadManualSelection() {
+  const names = getCheckedValues('manualConfigsList');
+  if (!names.length) {
+    document.getElementById('manualReview').style.display = 'none';
+    document.getElementById('btnManualRun').disabled = true;
+    return;
+  }
+  // Snapshot configs into editable state (deep copy)
+  manualSelectedJobs = names.map(n => {
+    const c = SAVED_CONFIGS.find(x => x.name === n);
+    return c ? JSON.parse(JSON.stringify(c)) : null;
+  }).filter(Boolean);
+  renderManualReview();
+  document.getElementById('btnManualRun').disabled = false;
+}
 
-  // Reset search input
-  const sSearchEl = document.getElementById('sFieldsSearch');
-  if (sSearchEl) sSearchEl.value = '';
+function renderManualReview() {
+  const wrap = document.getElementById('manualReview');
+  wrap.style.display = 'block';
+  wrap.innerHTML = '';
+  manualSelectedJobs.forEach((job, idx) => {
+    const card = document.createElement('div');
+    card.className = 'manual-card';
+    card.id = `manualCard_${idx}`;
+    const ent = findEntity(job.entity);
+    const entName = ent ? ent.name : (job.entity || '?');
+    const dfName = job.date_field ? (DATE_LABELS[job.date_field] || job.date_field) : 'без даты';
+    card.innerHTML = `
+      <div class="mc-head">
+        <div class="mc-title">${idx + 1}. ${escapeHtml(job.name)}</div>
+        <div class="mc-status" id="mcStatus_${idx}">в очереди</div>
+      </div>
+      <div class="mc-meta">
+        <strong>Сущность:</strong> ${escapeHtml(entName)} <span class="mc-code">(${escapeHtml(job.entity)})</span><br>
+        <strong>Тип даты:</strong> ${escapeHtml(dfName)}
+      </div>
+      <div class="mc-edit-toggle">
+        <a onclick="toggleManualEdit(${idx})">▸ Просмотреть/изменить фильтры и поля</a>
+        <span class="mc-hint">Изменения здесь не сохранятся в конфигурацию</span>
+      </div>
+      <div class="mc-edit-body" id="mcEdit_${idx}" style="display:none">
+        <div class="mc-loading">Загрузка фильтров...</div>
+      </div>
+      <div class="mc-log" id="mcLog_${idx}"></div>
+    `;
+    wrap.appendChild(card);
+  });
+}
 
+async function toggleManualEdit(idx) {
+  const body = document.getElementById(`mcEdit_${idx}`);
+  if (body.dataset.loaded === '1') {
+    body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    return;
+  }
+  body.style.display = 'block';
+  const job = manualSelectedJobs[idx];
+  body.innerHTML = '<div class="mc-loading">Загрузка фильтров...</div>';
+  try {
+    await renderJobEditor(idx, job, body);
+    body.dataset.loaded = '1';
+  } catch (e) {
+    body.innerHTML = `<div class="mc-loading" style="color:var(--err)">Ошибка: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function renderJobEditor(idx, job, container) {
+  const entity = job.entity;
   const [fieldsRes, funnelsRes, labelsRes] = await Promise.all([
     fetch(`/api/entity-fields?entity=${entity}`).then(r => r.json()).catch(() => ({fields:[]})),
     fetch(`/api/crm-funnels?entity=${entity}`).then(r => r.json()).catch(() => []),
     fetch(`/api/field-labels?entity=${entity}`).then(r => r.json()).catch(() => ({})),
   ]);
 
-  if (fieldsRes.fields && fieldsRes.fields.length) {
-    renderCheckboxes('sFieldsList', fieldsRes.fields.map(f => ({id: f, name: f})), null);
-    const hasTranslations = fieldsRes.fields.some(f => labelsRes[f] && labelsRes[f] !== f);
-    if (hasTranslations) {
-      renderCheckboxes('sFieldsRuList',
-        fieldsRes.fields.map(f => ({id: f, name: (labelsRes[f] && labelsRes[f] !== f) ? labelsRes[f] : f})),
-        null
-      );
-      wireSyncSchedRuToOrig();
-      wireSyncSchedOrigToRu();
-      document.getElementById('sFieldsRuGroup').style.display = 'block';
-      document.getElementById('sFieldsOrigTitle').textContent = 'Оригинальные названия';
-    }
-    updateSchedFieldsCount();
-    document.getElementById('sFieldsGroup').style.display = 'block';
+  // Determine stages: if funnels exist, fetch with selected categories; else default
+  let stages = [];
+  if (funnelsRes.length) {
+    const allCats = funnelsRes.map(f => f.id);
+    const params = new URLSearchParams({entity, category_ids: allCats.join(',')});
+    stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
+  } else if (['crm_deal','crm_deal_uf','crm_deal_stage_history','crm_deal_product_row'].includes(entity)) {
+    stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
+  } else if (entity === 'crm_lead') {
+    stages = await fetch(`/api/crm-stages?entity=crm_lead`).then(r => r.json()).catch(() => []);
+  } else if (entity.startsWith('crm_dynamic_items_') && !entity.endsWith('_product_row')) {
+    stages = await fetch(`/api/crm-stages?entity=${entity}`).then(r => r.json()).catch(() => []);
   }
+
+  // Map saved filters to sets
+  const savedFilters = {};
+  (job.dimensions_filters || []).forEach(f => savedFilters[f.fieldName] = new Set(f.values || []));
+  const savedFields = job.fields && job.fields.length ? new Set(job.fields) : null;
+
+  container.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'mc-edit-grid';
 
   if (funnelsRes.length) {
-    renderCheckboxes('sFunnelsList', funnelsRes, null);
-    await loadSchedStages(entity, funnelsRes.map(f => f.id));
-    document.querySelectorAll('#sFunnelsList input').forEach(cb =>
-      cb.addEventListener('change', onSchedFunnelChange));
-    document.getElementById('sFunnelsGroup').style.display = 'block';
-  } else if (['crm_deal','crm_deal_uf','crm_deal_stage_history','crm_deal_product_row'].includes(entity)) {
-    const stages = await fetch(`/api/crm-stages?entity=crm_deal&category_ids=0`).then(r => r.json()).catch(() => []);
-    if (stages.length) {
-      renderCheckboxes('sStagesList', stages, null);
-      document.getElementById('sStagesGroup').style.display = 'block';
+    grid.appendChild(buildCheckGroup('Воронки', `mcFun_${idx}`, funnelsRes, savedFilters['CATEGORY_ID']));
+  }
+  if (stages.length) {
+    grid.appendChild(buildCheckGroup('Стадии', `mcStg_${idx}`, stages, savedFilters['STAGE_ID']));
+  }
+  container.appendChild(grid);
+
+  if (fieldsRes.fields && fieldsRes.fields.length) {
+    const items = fieldsRes.fields.map(f => ({
+      id: f,
+      name: (labelsRes[f] && labelsRes[f] !== f) ? `${labelsRes[f]} (${f})` : f
+    }));
+    container.appendChild(buildCheckGroup('Поля', `mcFld_${idx}`, items, savedFields));
+  }
+}
+
+function buildCheckGroup(title, listId, items, selectedSet) {
+  // selectedSet=null/undefined → "all checked" (no filter saved). Set with values → only those.
+  const wrap = document.createElement('div');
+  wrap.className = 'mc-group';
+  wrap.innerHTML = `
+    <label class="form-label">${escapeHtml(title)}
+      <span class="sel-btns">
+        <a onclick="checkAll('${listId}',true)">Все</a> /
+        <a onclick="checkAll('${listId}',false)">Снять</a>
+      </span>
+    </label>
+    <div id="${listId}" class="checkbox-group"></div>
+  `;
+  const list = wrap.querySelector(`#${listId}`);
+  items.forEach(item => {
+    const lbl = document.createElement('label');
+    lbl.className = 'checkbox-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = item.id;
+    cb.checked = selectedSet ? selectedSet.has(String(item.id)) : true;
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' ' + (item.name || item.id)));
+    list.appendChild(lbl);
+  });
+  return wrap;
+}
+
+function collectManualJobsFromUI() {
+  return manualSelectedJobs.map((job, idx) => {
+    const out = {
+      name:       job.name,
+      entity:     job.entity,
+      date_field: job.date_field || '',
+    };
+    // Filters from card editor (if loaded). Otherwise use saved values.
+    const funListId = `mcFun_${idx}`;
+    const stgListId = `mcStg_${idx}`;
+    const fldListId = `mcFld_${idx}`;
+    const dims = [];
+    if (document.getElementById(funListId)) {
+      const all = getAllValues(funListId), chk = getCheckedValues(funListId);
+      if (all.length && chk.length && chk.length < all.length) {
+        dims.push({fieldName:'CATEGORY_ID', values: chk, type:'INCLUDE', operator:'IN_LIST'});
+      }
+    } else if (job.dimensions_filters) {
+      const f = job.dimensions_filters.find(x => x.fieldName === 'CATEGORY_ID');
+      if (f) dims.push(f);
     }
-  } else if (entity === 'crm_lead') {
-    const stages = await fetch(`/api/crm-stages?entity=crm_lead`).then(r => r.json()).catch(() => []);
-    if (stages.length) {
-      renderCheckboxes('sStagesList', stages, null);
-      document.getElementById('sStagesGroup').style.display = 'block';
+    if (document.getElementById(stgListId)) {
+      const all = getAllValues(stgListId), chk = getCheckedValues(stgListId);
+      if (all.length && chk.length && chk.length < all.length) {
+        dims.push({fieldName:'STAGE_ID', values: chk, type:'INCLUDE', operator:'IN_LIST'});
+      }
+    } else if (job.dimensions_filters) {
+      const f = job.dimensions_filters.find(x => x.fieldName === 'STAGE_ID');
+      if (f) dims.push(f);
     }
-  } else if (entity.startsWith('crm_dynamic_items_') && !entity.endsWith('_product_row')) {
-    const stages = await fetch(`/api/crm-stages?entity=${entity}`).then(r => r.json()).catch(() => []);
-    if (stages.length) {
-      renderCheckboxes('sStagesList', stages, null);
-      document.getElementById('sStagesGroup').style.display = 'block';
+    if (dims.length) out.dimensions_filters = dims;
+
+    if (document.getElementById(fldListId)) {
+      const all = getAllValues(fldListId), chk = getCheckedValues(fldListId);
+      if (all.length && chk.length < all.length) out.fields = chk;
+    } else if (job.fields && job.fields.length) {
+      out.fields = job.fields;
+    }
+    return out;
+  });
+}
+
+async function runManualBatch() {
+  if (!manualSelectedJobs.length) return;
+  const start_date = v('manualStartDate');
+  const end_date   = v('manualEndDate');
+  // Allow empty dates only if all jobs have no date_field
+  const anyWithDate = manualSelectedJobs.some(j => j.date_field);
+  if (anyWithDate && (!start_date || !end_date)) {
+    alert('Укажите период выгрузки (для конфигураций с типом даты).');
+    return;
+  }
+  if (manualController) { manualController.abort(); manualController = null; }
+
+  const btn = document.getElementById('btnManualRun');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Выгружаю...';
+
+  // Reset card statuses and logs
+  manualSelectedJobs.forEach((_, idx) => {
+    const st = document.getElementById(`mcStatus_${idx}`);
+    const log = document.getElementById(`mcLog_${idx}`);
+    if (st) { st.textContent = 'в очереди'; st.className = 'mc-status'; }
+    if (log) log.innerHTML = '';
+  });
+
+  document.getElementById('manualLog').innerHTML = '';
+  document.getElementById('manualTotalLabel').textContent = '0 строк';
+  document.getElementById('manualStatusLabel').textContent = 'Запуск...';
+  document.getElementById('manualFooter').style.display = 'none';
+  document.getElementById('manualProgress').style.display = 'block';
+
+  const jobs = collectManualJobsFromUI();
+  const body = { jobs, start_date, end_date };
+
+  const controller = new AbortController();
+  manualController = controller;
+
+  try {
+    const resp = await fetch('/api/manual-export-stream', {
+      method: 'POST', headers: json_h(),
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try { handleManualEvent(JSON.parse(line.slice(6))); } catch(e) {}
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      document.getElementById('manualStatusLabel').textContent = 'Ошибка';
+      showManualFooter('err', '❌ ' + e.message);
+    }
+  } finally {
+    resetManualBtn();
+    manualController = null;
+  }
+}
+
+let manualGrandTotal = 0;
+
+function handleManualEvent(d) {
+  if (d.status === 'all_done') {
+    manualGrandTotal = d.total || 0;
+    document.getElementById('manualStatusLabel').textContent = 'Готово';
+    document.getElementById('manualTotalLabel').textContent = num(manualGrandTotal) + ' строк итого';
+    showManualFooter('ok', `✅ Все выгрузки завершены — ${num(manualGrandTotal)} строк суммарно`);
+    return;
+  }
+  if (d.status === 'job_start') {
+    manualGrandTotal = manualGrandTotal || 0;
+    const jobIdx = d.job_idx;
+    const st = document.getElementById(`mcStatus_${jobIdx}`);
+    if (st) { st.textContent = '⏳ выполняется'; st.className = 'mc-status mc-running'; }
+    document.getElementById('manualStatusLabel').textContent =
+      `Конфигурация ${jobIdx + 1}/${d.total_jobs}: ${d.job_name}`;
+    addManualLog(`▶ [${d.job_name}] старт (сущность: ${d.entity})`, 'start');
+    return;
+  }
+  if (d.status === 'job_done') {
+    const st = document.getElementById(`mcStatus_${d.job_idx}`);
+    if (d.error) {
+      if (st) { st.textContent = '❌ ошибка'; st.className = 'mc-status mc-err'; }
+      addManualLog(`❌ [${d.job_name}] ошибка: ${d.error}`, 'err');
+    } else {
+      if (st) { st.textContent = `✅ готово (${num(d.rows)} строк)`; st.className = 'mc-status mc-ok'; }
+      addManualLog(`✅ [${d.job_name}] готово — ${num(d.rows)} строк`, 'ok');
+    }
+    manualGrandTotal += (d.rows || 0);
+    document.getElementById('manualTotalLabel').textContent = num(manualGrandTotal) + ' строк';
+    return;
+  }
+  // Per-day events from inner iterator (have job_idx + job_name attached)
+  const jobName = d.job_name || '';
+  const cardLog = d.job_idx != null ? document.getElementById(`mcLog_${d.job_idx}`) : null;
+
+  if (d.status === 'info') {
+    addManualLog(`  [${jobName}] ${d.message}`, 'info');
+    if (cardLog) appendCardLog(cardLog, `  ${d.message}`, 'info');
+    return;
+  }
+  if (d.date) {
+    const ico = d.status === 'ok' ? '✅' : '❌';
+    const msg = d.status === 'ok'
+      ? `  [${jobName}] ${fmtDate(d.date)} — ${num(d.rows)} строк ${ico}`
+      : `  [${jobName}] ${fmtDate(d.date)} — ошибка: ${d.error || ''} ${ico}`;
+    addManualLog(msg, d.status);
+    if (cardLog) {
+      const text = d.status === 'ok'
+        ? `${fmtDate(d.date)} — ${num(d.rows)} строк ${ico}`
+        : `${fmtDate(d.date)} — ошибка: ${d.error || ''} ${ico}`;
+      appendCardLog(cardLog, text, d.status);
     }
   }
-
-  loading.style.display = 'none';
 }
 
-async function loadSchedStages(entity, categoryIds) {
-  const prevState = {};
-  document.querySelectorAll('#sStagesList input').forEach(cb => { prevState[cb.value] = cb.checked; });
-
-  const params = new URLSearchParams({entity, category_ids: categoryIds.join(',')});
-  const stages = await fetch(`/api/crm-stages?${params}`).then(r => r.json()).catch(() => []);
-  if (!stages.length) { document.getElementById('sStagesGroup').style.display = 'none'; return; }
-  renderStagesGrouped('sStagesList', stages, getFunnelNameMap('sFunnelsList'), null);
-  document.querySelectorAll('#sStagesList input').forEach(cb => {
-    if (cb.value in prevState) cb.checked = prevState[cb.value];
-  });
-  document.getElementById('sStagesGroup').style.display = 'block';
+function addManualLog(text, type) {
+  const log = document.getElementById('manualLog');
+  const row = document.createElement('div');
+  row.className = 'log-row log-' + (type || 'info');
+  row.textContent = text;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
 }
 
-async function onSchedFunnelChange() {
-  const checked = getCheckedValues('sFunnelsList');
-  const all     = getAllValues('sFunnelsList');
-  await loadSchedStages(currentSchedEntity, checked.length ? checked : all);
+function appendCardLog(container, text, type) {
+  const row = document.createElement('div');
+  row.className = 'mc-log-row mc-log-' + (type || 'info');
+  row.textContent = text;
+  container.appendChild(row);
+  container.scrollTop = container.scrollHeight;
 }
 
-function checkAllSchedFields(state) {
-  document.querySelectorAll('#sFieldsList input, #sFieldsRuList input').forEach(cb => cb.checked = state);
-  updateSchedFieldsCount();
+function showManualFooter(type, text) {
+  const f = document.getElementById('manualFooter');
+  f.style.display = '';
+  f.className = 'progress-footer ' + type;
+  document.getElementById('manualSummary').textContent = text;
 }
 
-function filterSchedFields(query) {
-  const q = query.toLowerCase().trim();
-  ['sFieldsRuList', 'sFieldsList'].forEach(id => {
-    document.querySelectorAll(`#${id} .checkbox-item`).forEach(lbl => {
-      lbl.style.display = (!q || lbl.textContent.toLowerCase().includes(q)) ? '' : 'none';
+function resetManualBtn() {
+  const btn = document.getElementById('btnManualRun');
+  btn.disabled = false;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M8 5v14l11-7z"/></svg> Запустить выгрузку';
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Reconciliation
+// ═══════════════════════════════════════════════════════════════
+let reconcileResults = []; // [{config_name, entity, result}]
+let reconcileController = null;
+
+async function runReconcileCheck() {
+  const configs = getCheckedValues('reconcileConfigsList');
+  if (!configs.length) {
+    alert('Выберите хотя бы одну сохранённую конфигурацию');
+    return;
+  }
+  const start_date = v('reconcileStartDate');
+  const end_date   = v('reconcileEndDate');
+  if (!start_date || !end_date) {
+    alert('Укажите период по дате изменения');
+    return;
+  }
+
+  if (reconcileController) { reconcileController.abort(); reconcileController = null; }
+
+  const btn = document.getElementById('btnReconcileCheck');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Проверяю...';
+
+  reconcileResults = [];
+  document.getElementById('reconcileLog').innerHTML = '';
+  document.getElementById('reconcileStatusLabel').textContent = 'Запуск...';
+  document.getElementById('reconcileProgress').style.display = 'block';
+  document.getElementById('reconcileResults').style.display = 'none';
+  document.getElementById('reconcileResults').innerHTML = '';
+
+  const controller = new AbortController();
+  reconcileController = controller;
+
+  try {
+    const resp = await fetch('/api/check-updates-stream', {
+      method: 'POST', headers: json_h(),
+      signal: controller.signal,
+      body: JSON.stringify({configs, start_date, end_date}),
     });
-  });
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try { handleReconcileEvent(JSON.parse(line.slice(6))); } catch(e) {}
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      addReconcileLog('❌ Ошибка: ' + e.message, 'err');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M19 3H5c-1.1 0-1.99.9-1.99 2L3 19c0 1.1.89 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg> Проверить изменения';
+    reconcileController = null;
+  }
 }
 
-function updateSchedFieldsCount() {
-  const total = getAllValues('sFieldsList').length;
-  const chk   = getCheckedValues('sFieldsList').length;
-  const el    = document.getElementById('sFieldsCount');
-  if (el) el.textContent = total ? `Выбрано: ${chk} из ${total}` : '';
+function handleReconcileEvent(d) {
+  if (d.status === 'all_done') {
+    document.getElementById('reconcileStatusLabel').textContent = 'Проверка завершена';
+    addReconcileLog(`✅ Проверка всех конфигураций завершена`, 'ok');
+    return;
+  }
+  if (d.status === 'config_start') {
+    document.getElementById('reconcileStatusLabel').textContent =
+      `Проверка ${d.config_idx + 1}/${d.total_configs}: ${d.config_name}`;
+    addReconcileLog(`▶ ${d.config_name} (поле даты изменения: ${d.modify_field || '—'})`, 'start');
+    return;
+  }
+  if (d.status === 'info') {
+    addReconcileLog('  ' + d.message, 'info');
+    return;
+  }
+  if (d.status === 'config_done') {
+    if (d.error) {
+      addReconcileLog(`❌ ${d.config_name}: ${d.error}`, 'err');
+    } else {
+      const r = d.result || {};
+      addReconcileLog(
+        `✅ ${d.config_name}: всего ${r.total_bitrix||0} | новых ${r.new?.length||0} | изменённых ${r.changed?.length||0} | без изменений ${r.unchanged_count||0}`,
+        'ok'
+      );
+      reconcileResults.push({
+        config_name: d.config_name,
+        entity:      d.entity,
+        result:      r,
+      });
+      renderReconcileCard(reconcileResults.length - 1);
+    }
+  }
 }
 
-function wireSyncSchedRuToOrig() {
-  document.querySelectorAll('#sFieldsRuList input').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const orig = document.querySelector(`#sFieldsList input[value="${cb.value}"]`);
-      if (orig && orig.checked !== cb.checked) orig.checked = cb.checked;
+function addReconcileLog(text, type) {
+  const log = document.getElementById('reconcileLog');
+  const row = document.createElement('div');
+  row.className = 'log-row log-' + (type || 'info');
+  row.textContent = text;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderReconcileCard(idx) {
+  const wrap = document.getElementById('reconcileResults');
+  wrap.style.display = 'block';
+  const item = reconcileResults[idx];
+  const r = item.result;
+  const ent = findEntity(item.entity);
+  const entName = ent ? ent.name : item.entity;
+
+  const card = document.createElement('div');
+  card.className = 'manual-card';
+  card.id = `recCard_${idx}`;
+
+  const newCount = (r.new || []).length;
+  const chgCount = (r.changed || []).length;
+  const totalApplicable = newCount + chgCount;
+  const warnHtml = r.warning
+    ? `<div class="rec-warn">⚠ ${escapeHtml(r.warning)}</div>` : '';
+
+  card.innerHTML = `
+    <div class="mc-head">
+      <div class="mc-title">${escapeHtml(item.config_name)}</div>
+      <div class="mc-status mc-ok">всего ${r.total_bitrix || 0}</div>
+    </div>
+    <div class="mc-meta">
+      <strong>Сущность:</strong> ${escapeHtml(entName)} <span class="mc-code">(${escapeHtml(item.entity)})</span><br>
+      <strong>Сводка:</strong>
+      <span class="rec-stat rec-new">🆕 новых: ${newCount}</span>
+      <span class="rec-stat rec-chg">✏️ изменённых: ${chgCount}</span>
+      <span class="rec-stat rec-same">✅ без изменений: ${r.unchanged_count || 0}</span>
+    </div>
+    ${warnHtml}
+    ${totalApplicable === 0 ? '<div class="rec-empty">Нет данных для актуализации.</div>' : `
+    <div class="rec-toggle">
+      <a onclick="toggleRecDetails(${idx})">▸ Показать список изменений</a>
+      <span class="sel-btns">
+        <a onclick="checkAllRec(${idx},true)">Выбрать все</a> /
+        <a onclick="checkAllRec(${idx},false)">Снять</a>
+      </span>
+    </div>
+    <div class="rec-details" id="recDetails_${idx}" style="display:none"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn btn-primary" type="button" onclick="applyRecChanges(${idx})">
+        Применить выбранные изменения
+      </button>
+      <span class="rec-apply-status" id="recApplyStatus_${idx}"></span>
+    </div>
+    `}
+  `;
+  wrap.appendChild(card);
+
+  if (totalApplicable > 0) buildRecDetails(idx);
+}
+
+function buildRecDetails(idx) {
+  const item = reconcileResults[idx];
+  const r = item.result;
+  const det = document.getElementById(`recDetails_${idx}`);
+  if (!det) return;
+  det.innerHTML = '';
+
+  const newRows = r.new || [];
+  const chgRows = r.changed || [];
+
+  if (newRows.length) {
+    const sec = document.createElement('div');
+    sec.className = 'rec-section';
+    sec.innerHTML = `<div class="rec-section-title">🆕 Новые (${newRows.length})</div>`;
+    const list = document.createElement('div');
+    list.className = 'rec-list';
+    newRows.forEach((rec, i) => {
+      const lbl = document.createElement('label');
+      lbl.className = 'rec-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = true;
+      cb.dataset.kind = 'new'; cb.dataset.idx = i;
+      lbl.appendChild(cb);
+      const span = document.createElement('span');
+      span.className = 'rec-item-label';
+      span.textContent = ` ID ${rec.id}`;
+      lbl.appendChild(span);
+      list.appendChild(lbl);
     });
-  });
-}
+    sec.appendChild(list);
+    det.appendChild(sec);
+  }
 
-function wireSyncSchedOrigToRu() {
-  document.querySelectorAll('#sFieldsList input').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const ru = document.querySelector(`#sFieldsRuList input[value="${cb.value}"]`);
-      if (ru && ru.checked !== cb.checked) ru.checked = cb.checked;
+  if (chgRows.length) {
+    const sec = document.createElement('div');
+    sec.className = 'rec-section';
+    sec.innerHTML = `<div class="rec-section-title">✏️ Изменённые (${chgRows.length})</div>`;
+    chgRows.forEach((rec, i) => {
+      const item = document.createElement('div');
+      item.className = 'rec-item rec-item-block';
+      const head = document.createElement('label');
+      head.className = 'rec-item-head';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = true;
+      cb.dataset.kind = 'chg'; cb.dataset.idx = i;
+      head.appendChild(cb);
+      const headSpan = document.createElement('span');
+      headSpan.className = 'rec-item-label';
+      const fieldNames = Object.keys(rec.diff || {});
+      headSpan.textContent = ` ID ${rec.id} — изменены поля: ${fieldNames.join(', ')}`;
+      head.appendChild(headSpan);
+      item.appendChild(head);
+      const diffWrap = document.createElement('div');
+      diffWrap.className = 'rec-diff';
+      fieldNames.forEach(field => {
+        const d = rec.diff[field];
+        const row = document.createElement('div');
+        row.className = 'rec-diff-row';
+        row.innerHTML = `
+          <span class="rec-diff-field">${escapeHtml(field)}:</span>
+          <span class="rec-diff-old">${escapeHtml(d.old || '∅')}</span>
+          <span class="rec-diff-arrow">→</span>
+          <span class="rec-diff-new">${escapeHtml(d.new || '∅')}</span>
+        `;
+        diffWrap.appendChild(row);
+      });
+      item.appendChild(diffWrap);
+      sec.appendChild(item);
     });
+    det.appendChild(sec);
+  }
+}
+
+function toggleRecDetails(idx) {
+  const det = document.getElementById(`recDetails_${idx}`);
+  if (!det) return;
+  det.style.display = det.style.display === 'none' ? 'block' : 'none';
+}
+
+function checkAllRec(idx, state) {
+  const det = document.getElementById(`recDetails_${idx}`);
+  if (!det) return;
+  det.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = state);
+}
+
+async function applyRecChanges(idx) {
+  const item = reconcileResults[idx];
+  const r = item.result;
+  const det = document.getElementById(`recDetails_${idx}`);
+  if (!det) return;
+
+  const selectedNew = [];
+  const selectedChg = [];
+  det.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    if (!cb.checked) return;
+    if (cb.dataset.kind === 'new') selectedNew.push((r.new || [])[+cb.dataset.idx]);
+    if (cb.dataset.kind === 'chg') selectedChg.push((r.changed || [])[+cb.dataset.idx]);
   });
+
+  if (!selectedNew.length && !selectedChg.length) {
+    alert('Не выбрано ни одной строки для применения');
+    return;
+  }
+
+  // For changed: delete by ID, then insert. For new: just insert.
+  const delete_ids = selectedChg.map(x => String(x.id));
+  const rows = [...selectedNew, ...selectedChg].map(x => x.row);
+
+  const statusEl = document.getElementById(`recApplyStatus_${idx}`);
+  statusEl.textContent = '⏳ применяется...';
+  statusEl.className = 'rec-apply-status';
+
+  try {
+    const payload = {
+      entity:     item.entity,
+      headers:    r.headers,
+      rows,
+      delete_ids,
+    };
+    const resp = await fetch('/api/apply-updates', {
+      method: 'POST', headers: json_h(), body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Ошибка применения');
+    }
+    const res = await resp.json();
+    statusEl.textContent = `✅ применено: удалено ${res.deleted}, вставлено ${res.inserted}`;
+    statusEl.className = 'rec-apply-status rec-apply-ok';
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+    statusEl.className = 'rec-apply-status rec-apply-err';
+  }
 }
 
-function syncSchedFieldsToRu() {
-  document.querySelectorAll('#sFieldsList input').forEach(cb => {
-    const ru = document.querySelector(`#sFieldsRuList input[value="${cb.value}"]`);
-    if (ru) ru.checked = cb.checked;
+// ═══════════════════════════════════════════════════════════════
+// History
+// ═══════════════════════════════════════════════════════════════
+let HISTORY_ITEMS = [];
+
+const HIST_SOURCE_LABELS = {
+  manual_form:    { label: 'Отправка',     icon: '📤', cls: 'hist-src-form'  },
+  manual_batch:   { label: 'Ручная',       icon: '📦', cls: 'hist-src-batch' },
+  schedule:       { label: 'Расписание',   icon: '⏰', cls: 'hist-src-sched' },
+  reconciliation: { label: 'Сверка',       icon: '🔄', cls: 'hist-src-rec'   },
+};
+
+async function loadHistory() {
+  const list = document.getElementById('histList');
+  list.innerHTML = '<div class="manual-empty">Загрузка...</div>';
+  try {
+    HISTORY_ITEMS = await fetch('/api/history?limit=500').then(r => r.json());
+    renderHistory();
+  } catch (e) {
+    list.innerHTML = `<div class="manual-empty" style="color:var(--err)">Ошибка: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function clearHistory() {
+  if (!confirm('Очистить всю историю? Это действие необратимо.')) return;
+  await fetch('/api/history', { method: 'DELETE' });
+  HISTORY_ITEMS = [];
+  renderHistory();
+}
+
+function renderHistory() {
+  const srcF = v('histSourceFilter');
+  const stF  = v('histStatusFilter');
+  const q    = (document.getElementById('histSearch').value || '').toLowerCase().trim();
+
+  let items = HISTORY_ITEMS;
+  if (srcF) items = items.filter(i => i.source === srcF);
+  if (stF)  items = items.filter(i => i.status === stF);
+  if (q) {
+    items = items.filter(i => {
+      const hay = [i.entity, i.entity_name, i.config_name].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  // Stats
+  const okCount  = items.filter(i => i.status === 'ok').length;
+  const errCount = items.filter(i => i.status === 'error').length;
+  const totalRows = items.reduce((s, i) => s + (i.rows || 0), 0);
+  document.getElementById('histStats').innerHTML = items.length
+    ? `Показано: <b>${items.length}</b> | ✅ ${okCount} | ❌ ${errCount} | строк суммарно: <b>${num(totalRows)}</b>`
+    : '';
+
+  const list = document.getElementById('histList');
+  if (!items.length) {
+    list.innerHTML = '<div class="manual-empty">Нет записей по выбранным фильтрам.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  items.forEach(it => list.appendChild(renderHistoryRow(it)));
+}
+
+function renderHistoryRow(it) {
+  const src = HIST_SOURCE_LABELS[it.source] || { label: it.source, icon: '•', cls: '' };
+  const dt = formatHistDate(it.started_at);
+  const statusIcon = it.status === 'ok' ? '✅' : '❌';
+  const dur = it.duration_sec != null ? formatDuration(it.duration_sec) : '';
+  const dateRange = (it.start_date && it.end_date)
+    ? `${fmtDate(it.start_date)}—${fmtDate(it.end_date)}`
+    : (it.start_date ? fmtDate(it.start_date) : '—');
+  const cfgBadge = it.config_name
+    ? `<span class="hist-cfg" title="Конфигурация">${escapeHtml(it.config_name)}</span>` : '';
+  const filtersCount = (it.dimensions_filters || []).length;
+  const fieldsCount  = (it.fields || []).length;
+  const extras = [];
+  if (filtersCount) extras.push(`${filtersCount} фильтр${filtersCount === 1 ? '' : 'а'}`);
+  if (fieldsCount)  extras.push(`${fieldsCount} пол${fieldsCount === 1 ? 'е' : 'ей'}`);
+  const extraStr = extras.length ? ` · ${extras.join(' · ')}` : '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'hist-row hist-' + (it.status === 'error' ? 'err' : 'ok');
+
+  wrap.innerHTML = `
+    <div class="hist-summary" onclick="this.parentElement.classList.toggle('expanded')">
+      <span class="hist-status">${statusIcon}</span>
+      <span class="hist-time">${dt}</span>
+      <span class="hist-src-badge ${src.cls}">${src.icon} ${escapeHtml(src.label)}</span>
+      ${cfgBadge}
+      <span class="hist-entity-name" title="${escapeHtml(it.entity || '')}">${escapeHtml(it.entity_name || it.entity || '—')}</span>
+      <span class="hist-period">${dateRange}</span>
+      <span class="hist-rows-count" title="строк">${num(it.rows || 0)}</span>
+      <span class="hist-extras">${escapeHtml(dur)}${extraStr}</span>
+      <span class="hist-toggle">▾</span>
+    </div>
+    <div class="hist-details">
+      ${renderHistoryDetails(it)}
+    </div>
+  `;
+  return wrap;
+}
+
+function renderHistoryDetails(it) {
+  const parts = [];
+  if (it.error) {
+    parts.push(`<div class="hist-detail-row hist-error-row">
+      <span class="hist-detail-label">Ошибка:</span>
+      <code class="hist-error-text">${escapeHtml(it.error)}</code>
+    </div>`);
+  }
+
+  parts.push(`<div class="hist-detail-row">
+    <span class="hist-detail-label">Период:</span>
+    ${it.start_date ? `${fmtDate(it.start_date)} — ${fmtDate(it.end_date || it.start_date)}` : '—'}
+    ${it.date_field ? ` (по ${escapeHtml(DATE_LABELS[it.date_field] || it.date_field)})` : ''}
+  </div>`);
+
+  parts.push(`<div class="hist-detail-row">
+    <span class="hist-detail-label">Длительность:</span>
+    ${formatDuration(it.duration_sec || 0)} (${escapeHtml(formatHistDate(it.started_at))} → ${escapeHtml(formatHistDate(it.finished_at))})
+  </div>`);
+
+  // Filters
+  const dims = it.dimensions_filters || [];
+  if (dims.length) {
+    const blocks = dims.map(f => {
+      const vals = (f.values || []).map(escapeHtml).join(', ');
+      return `<div class="hist-filter-block">
+        <b>${escapeHtml(f.fieldName)}</b> ${escapeHtml(f.operator || 'IN_LIST')} [${vals}]
+      </div>`;
+    }).join('');
+    parts.push(`<div class="hist-detail-row">
+      <span class="hist-detail-label">Фильтры:</span>
+      <div class="hist-filters-block">${blocks}</div>
+    </div>`);
+  } else {
+    parts.push(`<div class="hist-detail-row">
+      <span class="hist-detail-label">Фильтры:</span>
+      <span class="hist-muted">—</span>
+    </div>`);
+  }
+
+  // Fields
+  const flds = it.fields || [];
+  if (flds.length) {
+    const chips = flds.map(f => `<span class="hist-field-chip">${escapeHtml(f)}</span>`).join('');
+    parts.push(`<div class="hist-detail-row">
+      <span class="hist-detail-label">Поля (${flds.length}):</span>
+      <div class="hist-fields-block">${chips}</div>
+    </div>`);
+  } else {
+    parts.push(`<div class="hist-detail-row">
+      <span class="hist-detail-label">Поля:</span>
+      <span class="hist-muted">все</span>
+    </div>`);
+  }
+
+  if (it.deleted != null) {
+    parts.push(`<div class="hist-detail-row">
+      <span class="hist-detail-label">Удалено:</span>
+      ${num(it.deleted)} строк (для замены свежими)
+    </div>`);
+  }
+
+  return parts.join('');
+}
+
+function formatHistDate(iso) {
+  if (!iso) return '';
+  // 2026-05-04T11:44:38 → 04.05.2026 11:44
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatDuration(sec) {
+  if (!sec || sec < 1) return '<1с';
+  if (sec < 60) return sec + 'с';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s ? `${m}м ${s}с` : `${m}м`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm ? `${h}ч ${mm}м` : `${h}ч`;
+}
+
+// Wire filters
+document.addEventListener('DOMContentLoaded', () => {
+  ['histSourceFilter', 'histStatusFilter', 'histSearch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input',  renderHistory);
+    el.addEventListener('change', renderHistory);
   });
-}
-
-function collectSchedDimensionsFilters() {
-  const filters = [];
-  const allF = getAllValues('sFunnelsList'), chkF = getCheckedValues('sFunnelsList');
-  if (allF.length && chkF.length && chkF.length < allF.length)
-    filters.push({fieldName:'CATEGORY_ID', values: chkF, type:'INCLUDE', operator:'IN_LIST'});
-  const allS = getAllValues('sStagesList'), chkS = getCheckedValues('sStagesList');
-  if (allS.length && chkS.length && chkS.length < allS.length)
-    filters.push({fieldName:'STAGE_ID', values: chkS, type:'INCLUDE', operator:'IN_LIST'});
-  return filters;
-}
-
-function collectSchedSelectedFields() {
-  const all = getAllValues('sFieldsList'), chk = getCheckedValues('sFieldsList');
-  return (all.length && chk.length < all.length) ? chk : [];
-}
-
-function restoreSchedDimensionsFilters(filters) {
-  if (!filters || !filters.length) return;
-  filters.forEach(f => {
-    const containerId = f.fieldName === 'CATEGORY_ID' ? 'sFunnelsList' : 'sStagesList';
-    const set = new Set(f.values);
-    document.querySelectorAll(`#${containerId} input`).forEach(cb => { cb.checked = set.has(cb.value); });
-  });
-}
-
-function restoreSchedFields(fields) {
-  if (!fields || !fields.length) return;
-  const set = new Set(fields);
-  document.querySelectorAll('#sFieldsList input').forEach(cb => { cb.checked = set.has(cb.value); });
-  syncSchedFieldsToRu();
-  updateSchedFieldsCount();
-}
+});
 
 // ═══════════════════════════════════════════════════════════════
 // Helpers

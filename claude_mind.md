@@ -1,0 +1,168 @@
+# claude_mind.md — память по проекту b24endclickhouse
+
+## Назначение
+Локальное FastAPI-приложение: выгружает данные из Bitrix24 (через BI-коннектор + REST webhook) и пишет их в ClickHouse. UI — одностраничник, запускается через `start.bat` на http://127.0.0.1:8000.
+
+## Стек
+- Python 3 + FastAPI + Uvicorn (`requirements.txt`)
+- APScheduler (BackgroundScheduler, TZ=Europe/Moscow) — расписание
+- clickhouse-connect — запись в ClickHouse
+- Jinja2 + один шаблон `templates/index.html`
+- Статика: `static/style.css`
+- Состояние: `config.json` (создаётся в корне)
+
+## Запуск
+- `install.bat` → `pip install -r requirements.txt`
+- `start.bat` → `python -m uvicorn main:app --host 127.0.0.1 --port 8000`
+- Если ругается `No module named uvicorn` — пользователь не запустил `install.bat` (типичная проблема при переносе на новый ПК)
+
+## Структура файлов
+- `main.py` — весь backend (~1024 строки, всё в одном файле)
+- `templates/index.html` — UI + JS (~1372 строки, всё в одном файле)
+- `static/style.css` — стили (~618 строк)
+- `config.json` — runtime-настройки (gitignored)
+
+## Backend: ключевые блоки `main.py`
+
+### Каталог сущностей
+- `ENTITIES` (строки 34-95) — словарь категорий → список объектов `{code, name, date_fields}`
+- `DATE_FIELD_LABELS` (97-109) — маппинг кодов дат на русские лейблы
+- Кастомные сущности (смарт-процессы) хранятся в `config["custom_entities"]`, добавляются вручную или авто через `/api/smart-processes` (требуется REST webhook)
+
+### Конфиг
+- `load_config()` / `save_config()` (120-132) — JSON в `config.json`
+- Дефолтная схема: `bitrix{portal,bi_key,rest_webhook}`, `clickhouse{host,port,database,username,password}`, `schedule{enabled,frequency,time_msk,entity,date_field,days_back,dimensions_filters?,fields?}`
+
+### Bitrix24
+- `fetch_from_bitrix()` (143-170) — POST на `/bitrix/tools/biconnector/pbi.php`. Принимает `dimensions_filters` (список фильтров `{fieldName, values, type, operator}`), `fields`, `limit`. Если ответ — dict, значит ошибка коннектора.
+- `_rest()` / `_rest_post()` — обычные REST-вызовы webhook
+- `_uf_labels_via_batch()` (186-221) — пакетный fetch русских названий пользовательских полей
+
+### ClickHouse
+- `get_ch_client()` — secure-режим если порт 8443/9440
+- `_infer_type()`/`_convert()` — определение типов колонок по первым 30 значениям
+- `push_to_clickhouse()` (287-321) — `CREATE TABLE IF NOT EXISTS`, типы берутся из существующей таблицы (важно: чтобы не сломать миграцию при смене формата значений)
+
+### Экспорт
+- `_do_export(data)` — фоновая выгрузка (BackgroundTasks)
+- `export_status` — **глобальное состояние одной выгрузки** `{running, rows, error, last_run}`. Только одна выгрузка одновременно (см. `/api/export` — кидает 400 если уже идёт)
+- `_run_scheduled()` — вызывается шедулером с диапазоном "сегодня минус days_back"
+- `_apply_schedule()` — единственный job `"export_job"` пересоздаётся при сохранении расписания (ежедневно/еженедельно пн/ежемесячно 1-го)
+
+### Streaming export — `/api/export-stream`
+- POST с телом `{entity, date_field, start_date, end_date, dimensions_filters?, fields?}`
+- Возвращает SSE-поток (`text/event-stream`) с событиями `info`/`ok`/`error`/`done`
+- 3 спец-режима:
+  1. **`crm_deal_product_row` + `DEAL_CLOSEDATE`**: двухшаговый pivot — сначала ID сделок из `crm_deal` за день, потом товары по `DEAL_ID IN [...]`
+  2. **`crm_deal_uf` / `crm_deal_stage_history` с фильтром `CATEGORY_ID/STAGE_ID`**: BI-коннектор не принимает эти поля для UF-таблиц → pivot через `crm_deal` (см. `_needs_deal_id_pivot`)
+  3. Обычный режим: либо целиком одним запросом (если нет date_field), либо по дням
+- Каждый запрос обёрнут в `asyncio.shield` + heartbeat-таймауты по 20с — иначе клиент думает, что соединение умерло
+
+### Воронки/стадии (REST)
+- `/api/crm-funnels?entity=...` — `crm.category.list` (для сделок entityTypeId=2, для смарт-процессов извлекается из кода)
+- `/api/crm-stages?entity=...&category_ids=1,2` — `crm.dealcategory.stage.list` или `crm.status.list` (для лидов) или `crm.item.stage.list` (для СП)
+
+### Поля
+- `/api/entity-fields?entity=...` — fetch первой строки BI с `limit=1`, оттуда headers
+- `/api/field-labels?entity=...` — русские названия (стандартные через `crm.<entity>.fields`, UF — через batch userfield.get)
+
+### Прочие endpoints
+- `/api/test-connection` — POST `{test_bitrix?, test_clickhouse?}` → пингует оба
+- `/api/connection-status` — текущие флаги (заполняются `_check_connection_on_startup`)
+- `/api/export-status` — статус текущей выгрузки
+- `/api/schedule` GET/POST/DELETE
+
+## Frontend (`index.html`) — ключевые блоки JS
+
+### State
+- `ENTITIES`, `DATE_LABELS` грузятся в `boot()`
+- `activeController` — `AbortController` текущего fetch streaming
+- `currentFilterEntity`, `currentSchedEntity` — текущая выбранная сущность для каждой вкладки
+
+### LocalStorage
+- `LS.get/set/del` — JSON-обёртка
+- Ключи: `bi_export_entity`, `bi_start_date`, `bi_end_date`, `bi_date_field_<entity>`, `bi_<groupId>_<entity>` (для funnels/stages/fields)
+- Логика: если выбраны ВСЕ галочки в группе — сохраняется `null` (= "без фильтра по умолчанию"). Иначе массив выбранных.
+
+### Навигация
+- `.nav-item[data-page=...]` → переключает `.page#page-<name>` (4 страницы: export, settings, schedule, about)
+
+### Фильтры (export и sched — две почти одинаковые ветки!)
+- Воронки → стадии → поля
+- Стадии перерисовываются при изменении воронок (`onFunnelChange` / `onSchedFunnelChange`)
+- Два списка полей: оригинальные коды + русские названия, синхронизируются `wireSyncRuToOrig` / `wireSyncOrigToRu`
+- Поиск по полям: `filterFields` / `filterSchedFields`
+
+### `collectDimensionsFilters()` / `collectSchedDimensionsFilters()`
+- Возвращают фильтры ТОЛЬКО если выбран **подмножество** галочек (не все). Все галочки = без фильтра.
+- Аналогично для `collectSelectedFields` — если выбраны все, возвращает `[]` = все поля.
+
+### Streaming reader
+- `runExport()` (995) — POST на `/api/export-stream`, чтение `resp.body.getReader()`, парсинг `data: {...}\n\n`, `handleStreamEvent`
+
+## Важные технические детали и подводные камни
+
+1. **Только одна выгрузка одновременно** — глобальная `export_status`. Параллельный запуск отклоняется.
+2. **Только один scheduled job** (`export_job`) — для нескольких сущностей по расписанию это узкое место.
+3. **`_needs_deal_id_pivot`** — особенность BI-коннектора, нельзя фильтровать UF-таблицы по CATEGORY_ID/STAGE_ID напрямую.
+4. **Русские названия UF-полей** — медленно (batch до 50 за раз), кешировать стоит на клиенте/сервере.
+5. **Типы колонок** — после первой выгрузки берутся из таблицы, не из новой выборки (защита от смены типа).
+6. **`localStorage`** хранит фильтры ПО СУЩНОСТИ — при удалении из UI не сбрасывается.
+7. **Кодировка консоли Windows** — bat-файлы могут отображаться кракозябрами, это косметика.
+
+## Новые фичи (после первоначального состояния)
+
+### Сохранённые конфигурации (`saved_configs` в config.json)
+- CRUD: `GET/POST /api/saved-configs`, `PUT /api/saved-configs/{name}` (полное обновление содержимого), `POST /api/saved-configs/{name}/rename`, `DELETE /api/saved-configs/{name}`
+- При `POST` — конфликт имени → 409. При rename/delete — также чистится `schedule.configs`.
+- Конфиг хранит: `name, entity, date_field, dimensions_filters[], fields[]`. Даты не хранит.
+
+### Ручная отправка
+- `/api/manual-export-stream` принимает `{jobs: [{name,entity,date_field,dimensions_filters?,fields?}], start_date, end_date}`
+- Запускает их **последовательно** через `_export_event_iter`, обогащая каждое событие `job_idx/job_name`.
+- Эмиттит `job_start`/`job_done`/`all_done`.
+
+### Расписание (multi-config)
+- `schedule.configs: [name1, name2]` — множественный выбор сохранённых конфигов
+- `_run_scheduled` итерирует их последовательно через `_do_export`
+- Backwards-compat: если `configs` пуст, но есть старый `entity` — работает как раньше.
+
+### Сверка данных (`/api/check-updates-stream` + `/api/apply-updates`)
+- **Цель**: ловить ситуации, когда данные в Bitrix изменились задним числом (например, поправили CLOSEDATE сделки)
+- `_compare_with_clickhouse(config, entity, raw)`:
+  - Берёт raw из Bitrix (формат BI: [headers, row, ...])
+  - Требует колонку `ID` в headers (иначе warning, ничего не сравнивает)
+  - Группирует raw по ID, выбирает из CH `SELECT ... WHERE toString(ID) IN (...)` чанками по 1000
+  - Сравнивает только пересекающиеся колонки (CH ⋂ headers) после нормализации `_norm_for_compare`
+  - Возвращает `{headers, id_col, new[], changed[{id,row,diff}], unchanged_count, total_bitrix, warning?}`
+- `/api/check-updates-stream` стримит per-config события. Поле даты выбирается автоматически: первое из `[DATE_MODIFY, CHANGED_DATE, DATE_UPDATE]`, что есть в `entity.date_fields`.
+- `_apply_reconciliation`:
+  - Auto-ALTER ADD COLUMN для отсутствующих колонок
+  - `ALTER TABLE ... DELETE WHERE toString(ID) IN (...) SETTINGS mutations_sync = 2` — синхронная мутация
+  - `client.insert(...)` строки
+- **Ограничения**:
+  - Удалённые в Bitrix записи не обнаруживаются (DATE_MODIFY уже не приходит)
+  - Сравнение по string-нормализации — может ложно сработать при редких типах (бинарные)
+  - Сущности без ID пропускаются
+
+### Auto-ALTER ADD COLUMN (`push_to_clickhouse`)
+- Когда конфиг содержит поле, которого ещё нет в существующей CH-таблице (например, в Bitrix добавили UF), автоматически выполняется `ALTER TABLE ADD COLUMN IF NOT EXISTS \`<col>\` <type>`.
+- Это ловит частую ошибку `Unrecognized column 'X' in table Y` со стороны ClickHouse при INSERT.
+
+### История выгрузок (`history.json`)
+- Файл `history.json` в корне (gitignored через `.gitignore` если будет нужно). Capped at `HISTORY_LIMIT=1000` записей.
+- `_record_history(entry)` — prepend, автоинкремент `id`. Запись содержит `started_at, finished_at, duration_sec, source, config_name?, entity, entity_name, date_field, start_date, end_date, dimensions_filters, fields, rows, status, error?, deleted?`
+- `source` ∈ `manual_form` (single через /api/export-stream), `manual_batch` (через /api/manual-export-stream), `schedule` (из `_run_scheduled` → `_do_export`), `reconciliation` (из `/api/apply-updates`).
+- Хелпер `_iter_with_history(inner, source, ...)` — async pass-through generator, оборачивает `_export_event_iter` и записывает строку при завершении (счётчик rows из события `done`).
+- `_do_export(data, source, config_name)` — теперь принимает source/config_name, использует `fetch_from_bitrix_safe`, в `finally` записывает историю.
+- Endpoints: `GET /api/history?limit=N` (по умолчанию 200, при отсутствии — все), `DELETE /api/history` (полная очистка).
+- Frontend: вкладка `history` в навигации, при клике вызывает `loadHistory()`. Таблица с фильтрами (источник/статус/поиск), сжатые grid-row'ы, раскрытие по клику показывает фильтры + chip'ы полей.
+
+### Auto-skip removed Bitrix fields (`fetch_from_bitrix_safe`)
+- Wrapper над `fetch_from_bitrix`: ловит ошибку `Unrecognized column 'X'` со стороны Bitrix BI, удаляет X из `fields`, повторяет (до 30 итераций).
+- Возвращает `(raw, removed[])`. В стрим выводится info с пропущенными полями.
+
+## Стиль кода
+- Всё в одном файле (backend и frontend) — пользователь готов к большим файлам, но добавление файлов нежелательно без явной необходимости
+- Минимум комментариев на русском в backend, немного — на английском
+- Git: репозиторий не в git (`Is a git repository: false` в worktree), пользователь переносит исходники вручную
