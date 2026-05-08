@@ -619,20 +619,28 @@ select.form-control {
 
 /* ── Saved configs panel (Export page) ─────────────────────────── */
 .saved-configs-panel {
-  background: #f8fafc;
-  border: 1.5px solid #e2e8f0;
-  border-radius: var(--r);
-  padding: 16px 18px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 .sc-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
   flex-wrap: wrap;
 }
 .sc-row .form-control { flex: 1; min-width: 180px; }
-.sc-btn { flex: 0 0 auto; padding: 8px 14px; font-size: 12px; white-space: nowrap; }
+.sc-select { padding: 7px 10px; font-size: 13px; }
+.sc-btn { flex: 0 0 auto; padding: 7px 12px; font-size: 12px; white-space: nowrap; }
+.sc-save-panel {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  margin-top: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--r-sm);
+}
+.sc-save-panel .form-control { flex: 1; min-width: 180px; padding: 7px 10px; font-size: 13px; }
 
 /* ── Manual page: configs list and cards ───────────────────────── */
 .manual-configs-list {
@@ -868,6 +876,43 @@ select.form-control {
   padding: 4px 2px;
 }
 .hist-list { display: flex; flex-direction: column; gap: 4px; }
+.hist-more-row { display: flex; justify-content: center; padding: 12px 0 4px; }
+
+/* ── Data control tabs (Reconciliation + Deletion) ─────────────── */
+.dc-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 16px;
+}
+.dc-tab {
+  background: transparent;
+  border: none;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-family: inherit;
+  transition: color .15s, border-color .15s;
+}
+.dc-tab:hover { color: var(--text-1); }
+.dc-tab.active { color: var(--text-1); border-bottom-color: #2563eb; }
+.dc-warn-note { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
+
+/* ── Per-entry history actions ─────────────────────────────────── */
+.hist-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+.hist-actions-row .btn { padding: 6px 12px; font-size: 12px; }
+.hist-action-msg { font-size: 12px; margin-top: 6px; }
 .hist-row {
   border: 1px solid #e2e8f0;
   border-radius: var(--r-sm);
@@ -1385,6 +1430,20 @@ select.form-control {
 }
 .prov-mark-bitrix { background: #2563eb; }
 .prov-mark-ozon   { background: #ea580c; }
+
+/* ── Ozon gating (entity & run-button when no account chosen) ──── */
+.is-gated { opacity: .55; }
+.form-control.is-gated { background: #f8fafc; border-color: #e2e8f0; }
+.btn.is-gated { cursor: not-allowed; }
+.ozon-gate-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+}
 
 /* ── Saved-configs 3-dots menu ─────────────────────────────────── */
 .sc-menu-wrap { position: relative; }

@@ -461,7 +461,8 @@ def _do_export(data: dict, source: str = "manual_form",
                 raise Exception(f"Аккаунт Ozon '{account_name}' не найден")
             raw = _ozon_fetch_dispatch(account, data["entity"],
                                        data.get("start_date") or "",
-                                       data.get("end_date") or "")
+                                       data.get("end_date") or "",
+                                       data.get("fields") or None)
         else:
             raw, _removed = fetch_from_bitrix_safe(
                 config["bitrix"]["portal"],
@@ -1245,7 +1246,7 @@ async def api_manual_export_stream(data: dict):
             try:
                 if job_provider == "ozon":
                     inner = _ozon_export_event_iter(config, ozon_account, entity,
-                                                    df, start_date, end_date)
+                                                    df, start_date, end_date, flds)
                 else:
                     inner = _export_event_iter(config, entity, df,
                                                start_date, end_date,
@@ -1732,6 +1733,80 @@ async def api_clear_history():
     _save_history([])
     return {"status": "ok"}
 
+@app.delete("/api/history/{entry_id}")
+async def api_delete_history_entry(entry_id: int, also_data: bool = False):
+    """
+    Delete a single history entry by id.
+    If also_data=True — also delete the matching slice from ClickHouse using
+    the entry's table (=entity), date_field and start_date/end_date.
+    """
+    items = _load_history()
+    target = next((it for it in items if it.get("id") == entry_id), None)
+    if not target:
+        raise HTTPException(404, "Запись истории не найдена")
+
+    deleted_rows = 0
+    data_warn: Optional[str] = None
+    if also_data:
+        entity     = (target.get("entity") or "").strip()
+        date_field = (target.get("date_field") or "").strip()
+        start_date = (target.get("start_date") or "").strip()
+        end_date   = (target.get("end_date") or "").strip()
+        if not entity or not date_field or not start_date or not end_date:
+            data_warn = "Недостаточно данных в записи (нет сущности/даты/периода) — удалена только запись истории."
+        else:
+            try:
+                deleted_rows = _delete_clickhouse_period(entity, date_field, start_date, end_date)
+            except Exception as exc:
+                data_warn = f"Не удалось удалить из ClickHouse: {exc}"
+
+    items = [it for it in items if it.get("id") != entry_id]
+    _save_history(items)
+    return {"status": "ok", "deleted_rows": deleted_rows, "warning": data_warn}
+
+def _delete_clickhouse_period(entity: str, date_field: str,
+                              start_date: str, end_date: str) -> int:
+    """ALTER TABLE ... DELETE WHERE date_field BETWEEN start AND end. Returns row count before delete."""
+    config = load_config()
+    client = get_ch_client(config)
+    safe = entity.replace("`", "")
+    df_safe = date_field.replace("`", "")
+    # Count first so we can report deleted rows (synchronous mutation does not return count).
+    try:
+        cnt_res = client.query(
+            f"SELECT count() FROM `{safe}` "
+            f"WHERE toDate(`{df_safe}`) BETWEEN toDate('{start_date}') AND toDate('{end_date}')"
+        )
+        cnt = int(cnt_res.result_rows[0][0]) if cnt_res.result_rows else 0
+    except Exception as exc:
+        raise RuntimeError(f"COUNT failed: {exc}")
+    client.command(
+        f"ALTER TABLE `{safe}` DELETE "
+        f"WHERE toDate(`{df_safe}`) BETWEEN toDate('{start_date}') AND toDate('{end_date}') "
+        f"SETTINGS mutations_sync = 2"
+    )
+    return cnt
+
+@app.post("/api/delete-data")
+async def api_delete_data(data: dict):
+    """
+    Body: {entity, date_field, start_date, end_date}
+    Удаляет строки из ClickHouse за указанный период по выбранному полю даты.
+    """
+    entity     = (data.get("entity") or "").strip()
+    date_field = (data.get("date_field") or "").strip()
+    start_date = (data.get("start_date") or "").strip()
+    end_date   = (data.get("end_date") or "").strip()
+    if not entity:     raise HTTPException(400, "Не указана сущность")
+    if not date_field: raise HTTPException(400, "Не указано поле даты")
+    if not start_date or not end_date:
+        raise HTTPException(400, "Не указан период")
+    try:
+        deleted = _delete_clickhouse_period(entity, date_field, start_date, end_date)
+    except Exception as exc:
+        raise HTTPException(500, f"Ошибка удаления: {exc}")
+    return {"status": "ok", "deleted_rows": deleted}
+
 @app.delete("/api/saved-configs/{name}")
 async def api_delete_saved_config(name: str):
     config  = load_config()
@@ -1818,9 +1893,195 @@ OZON_ENTITIES = {
 }
 
 OZON_DATE_LABELS = {
-    "in_process_at":  "Дата приёмки",
+    "in_process_at":  "Дата заказа",
     "operation_date": "Дата операции",
     "date":           "Дата",
+}
+
+# Available fields per entity (matches headers produced by each fetcher).
+# When empty / not selected — all fields are returned.
+OZON_ENTITY_FIELDS: dict = {
+    "ozon_product": [
+        "product_id", "offer_id", "name", "barcode", "category_id",
+        "marketing_price", "min_price", "old_price", "price",
+        "vat", "is_discounted", "is_kgt", "archived",
+        "created_at", "primary_image", "images_count", "weight",
+    ],
+    "ozon_stock": [
+        "product_id", "offer_id", "sku", "warehouse_name", "present", "reserved",
+    ],
+    "ozon_posting_fbs": [
+        "posting_number", "order_id", "order_number", "status", "substatus",
+        "in_process_at", "shipment_date", "delivery_method_name", "warehouse_name",
+        "tracking_number", "is_express",
+        "product_sku", "product_offer_id", "product_name",
+        "product_price", "product_quantity", "product_currency_code",
+        "delivery_price", "commission_amount", "payout",
+    ],
+    "ozon_posting_fbo": [
+        "posting_number", "order_id", "order_number", "status", "substatus",
+        "in_process_at", "shipment_date", "delivery_method_name", "warehouse_name",
+        "tracking_number", "is_express",
+        "product_sku", "product_offer_id", "product_name",
+        "product_price", "product_quantity", "product_currency_code",
+        "delivery_price", "commission_amount", "payout",
+    ],
+    "ozon_returns_fbs": [
+        "id", "posting_number", "order_id", "sku", "offer_id", "name",
+        "quantity", "price", "status_name", "return_reason_name",
+        "accepted_from_customer_moment", "returned_to_ozon_moment",
+    ],
+    "ozon_returns_fbo": [
+        "id", "posting_number", "order_id", "sku", "offer_id", "name",
+        "quantity", "price", "status_name", "return_reason_name",
+        "accepted_from_customer_moment", "returned_to_ozon_moment",
+    ],
+    "ozon_finance_transaction": [
+        "operation_id", "operation_type", "operation_type_name", "operation_date",
+        "type", "posting_number", "delivery_schema",
+        "amount", "accruals_for_sale", "sale_commission",
+        "delivery_charge", "return_delivery_charge",
+        "services_count", "services_total", "services_summary",
+    ],
+    "ozon_analytics_data": ["date", "sku"] + OZON_ANALYTICS_DEFAULT_METRICS if False else [],
+    # ^ filled below since OZON_ANALYTICS_DEFAULT_METRICS is defined later
+    "ozon_analytics_stocks": [
+        "sku", "offer_id", "name",
+        "cluster_name", "warehouse_name",
+        "ads", "idc", "turnover_grade",
+        "available_stock_count", "valid_stock_count",
+        "transit_stock_count", "expiring_stock_count",
+        "requested_stock_count", "stock_defect_stock_count",
+        "return_from_customer_stock_count", "return_to_seller_stock_count",
+        "waiting_docs_stock_count", "other_stock_count",
+    ],
+    "ozon_perf_campaigns": [
+        "id", "title", "state", "advObjectType", "fromDate", "toDate",
+        "dailyBudget", "budget", "createdAt", "updatedAt",
+    ],
+    "ozon_perf_statistics": [
+        "date", "campaign_id", "campaign_title", "views", "clicks",
+        "moneySpent", "ordersMoney", "orders",
+    ],
+}
+
+OZON_FIELD_LABELS: dict = {
+    # Product
+    "product_id":       "ID товара",
+    "offer_id":         "Артикул продавца",
+    "name":             "Название",
+    "barcode":          "Штрихкод",
+    "category_id":      "ID категории",
+    "marketing_price":  "Маркетинговая цена",
+    "min_price":        "Минимальная цена",
+    "old_price":        "Старая цена",
+    "price":            "Цена",
+    "vat":              "НДС",
+    "is_discounted":    "Уценённый",
+    "is_kgt":           "КГТ",
+    "archived":         "В архиве",
+    "created_at":       "Дата создания",
+    "primary_image":    "Главное изображение",
+    "images_count":     "Кол-во изображений",
+    "weight":           "Вес",
+    # Stock
+    "sku":              "SKU",
+    "warehouse_name":   "Склад",
+    "present":          "В наличии",
+    "reserved":         "Зарезервировано",
+    # Posting
+    "posting_number":   "Номер отправления",
+    "order_id":         "ID заказа",
+    "order_number":     "Номер заказа",
+    "status":           "Статус",
+    "substatus":        "Подстатус",
+    "in_process_at":    "Дата заказа",
+    "shipment_date":    "Дата отгрузки",
+    "delivery_method_name": "Способ доставки",
+    "tracking_number":  "Трек-номер",
+    "is_express":       "Экспресс",
+    "product_sku":      "SKU товара",
+    "product_offer_id": "Артикул товара",
+    "product_name":     "Название товара",
+    "product_price":    "Цена товара",
+    "product_quantity": "Количество",
+    "product_currency_code": "Валюта",
+    "delivery_price":   "Стоимость доставки",
+    "delivery_charge":  "Стоимость доставки (нач.)",
+    "commission_amount":"Комиссия",
+    "payout":           "К выплате",
+    # Returns
+    "id":               "ID",
+    "quantity":         "Количество",
+    "status_name":      "Статус возврата",
+    "return_reason_name": "Причина возврата",
+    "accepted_from_customer_moment": "Принят от покупателя",
+    "returned_to_ozon_moment":       "Возвращён на Ozon",
+    # Finance
+    "operation_id":     "ID операции",
+    "operation_type":   "Тип операции (код)",
+    "operation_type_name": "Тип операции",
+    "operation_date":   "Дата операции",
+    "type":             "Категория",
+    "delivery_schema":  "Схема (FBO/FBS)",
+    "amount":           "Сумма",
+    "accruals_for_sale":"Начисления за товар",
+    "sale_commission":  "Комиссия Ozon",
+    "return_delivery_charge": "Возвратная доставка",
+    "services_count":   "Кол-во услуг",
+    "services_total":   "Сумма услуг",
+    "services_summary": "Услуги (детально)",
+    # Analytics
+    "date":             "Дата",
+    "revenue":          "Выручка",
+    "ordered_units":    "Заказано шт.",
+    "returns":          "Возвраты",
+    "hits_view_search": "Показы в поиске",
+    "hits_view_pdp":    "Показы карточки",
+    "hits_view":        "Показы всего",
+    "hits_tocart_search":"В корзину из поиска",
+    "hits_tocart_pdp":  "В корзину с карточки",
+    "hits_tocart":      "В корзину всего",
+    "session_view_search":"Сессии в поиске",
+    "session_view_pdp": "Сессии на карточке",
+    "session_view":     "Сессии всего",
+    "conv_tocart_search":"Конверсия в корзину (поиск)",
+    "conv_tocart_pdp":  "Конверсия в корзину (карточка)",
+    "conv_tocart":      "Конверсия в корзину",
+    "delivered_units":  "Доставлено шт.",
+    "cancellations":    "Отмены",
+    "ads":              "Средние продажи в день",
+    "idc":              "Дней до окончания",
+    "cluster_name":     "Кластер",
+    "turnover_grade":   "Грейд оборачиваемости",
+    "available_stock_count":   "Доступно",
+    "valid_stock_count":       "Годных",
+    "transit_stock_count":     "В пути",
+    "expiring_stock_count":    "Истекают",
+    "requested_stock_count":   "Запрошено к поставке",
+    "stock_defect_stock_count":"Брак",
+    "return_from_customer_stock_count": "Возврат от покупателя",
+    "return_to_seller_stock_count":     "Возврат продавцу",
+    "waiting_docs_stock_count":"Ожидают документов",
+    "other_stock_count":       "Прочее",
+    # Performance campaigns
+    "title":            "Название",
+    "state":            "Статус",
+    "advObjectType":    "Тип объекта",
+    "fromDate":         "С даты",
+    "toDate":           "По дату",
+    "dailyBudget":      "Дневной бюджет",
+    "budget":           "Бюджет",
+    "createdAt":        "Создана",
+    "updatedAt":        "Обновлена",
+    # Performance statistics
+    "campaign_id":      "ID кампании",
+    "campaign_title":   "Название кампании",
+    "views":            "Показы",
+    "clicks":           "Клики",
+    "moneySpent":       "Расход",
+    "ordersMoney":      "Сумма заказов",
+    "orders":           "Заказов",
 }
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -2144,6 +2405,9 @@ OZON_ANALYTICS_DEFAULT_METRICS = [
     "delivered_units", "cancellations",
 ]
 
+# Now that metrics list exists, fill the analytics_data fields entry
+OZON_ENTITY_FIELDS["ozon_analytics_data"] = ["date", "sku"] + OZON_ANALYTICS_DEFAULT_METRICS
+
 def _ozon_fetch_analytics_data(account: dict, start: str, end: str) -> list:
     headers = ["date", "sku"] + OZON_ANALYTICS_DEFAULT_METRICS
     rows: list = []
@@ -2171,33 +2435,70 @@ def _ozon_fetch_analytics_data(account: dict, start: str, end: str) -> list:
     return [headers] + rows
 
 def _ozon_fetch_analytics_stocks(account: dict) -> list:
-    headers = ["sku", "offer_id", "name", "warehouse_name",
-               "ads", "idc", "stock_count", "in_transit_count",
-               "expiring_count", "expiring_quantity"]
+    """
+    /v1/analytics/stocks requires explicit SKU list (1..100 per call).
+    Step 1 — collect all SKUs via /v4/product/info/stocks.
+    Step 2 — call analytics/stocks in chunks of 100 and aggregate.
+    """
+    headers = [
+        "sku", "offer_id", "name",
+        "cluster_name", "warehouse_name",
+        "ads", "idc", "turnover_grade",
+        "available_stock_count", "valid_stock_count",
+        "transit_stock_count", "expiring_stock_count",
+        "requested_stock_count", "stock_defect_stock_count",
+        "return_from_customer_stock_count", "return_to_seller_stock_count",
+        "waiting_docs_stock_count", "other_stock_count",
+    ]
     rows: list = []
-    body = {"limit": 1000, "offset": 0}
+
+    # Collect SKUs (deduplicated) from product stocks
+    sku_set: set = set()
+    cursor = ""
     while True:
-        try:
-            data = _ozon_seller_request(account, "POST", "/v1/analytics/stocks", body=body)
-        except Exception as e:
-            # Endpoint may require specific permissions; surface as empty with msg
-            raise
-        items = (data.get("result") or {}).get("items") or data.get("items") or []
+        body = {"cursor": cursor, "limit": 1000, "filter": {"visibility": "ALL"}}
+        data = _ozon_seller_request(account, "POST", "/v4/product/info/stocks", body=body)
+        items = data.get("items") or []
         if not items:
             break
         for it in items:
+            for s in (it.get("stocks") or []):
+                sku = s.get("sku")
+                if sku:
+                    sku_set.add(str(sku))
+        cursor = data.get("cursor") or ""
+        if not cursor or len(items) < 1000:
+            break
+    all_skus = list(sku_set)
+    if not all_skus:
+        return [headers]
+
+    for i in range(0, len(all_skus), 100):
+        chunk = all_skus[i:i + 100]
+        try:
+            data = _ozon_seller_request(
+                account, "POST", "/v1/analytics/stocks",
+                body={"skus": chunk}
+            )
+        except Exception as exc:
+            logger.warning("analytics/stocks chunk %d failed: %s", i, exc)
+            continue
+        items = data.get("items") or []
+        for it in items:
             rows.append([
                 it.get("sku"), it.get("offer_id"), it.get("name"),
+                it.get("cluster_name") or "",
                 it.get("warehouse_name") or "",
-                it.get("ads"), it.get("idc"),
-                it.get("stock_count") or it.get("present"),
-                it.get("in_transit_count"),
-                it.get("expiring_count"),
-                it.get("expiring_quantity"),
+                it.get("ads"), it.get("idc"), it.get("turnover_grade"),
+                it.get("available_stock_count"), it.get("valid_stock_count"),
+                it.get("transit_stock_count"), it.get("expiring_stock_count"),
+                it.get("requested_stock_count"),
+                it.get("stock_defect_stock_count"),
+                it.get("return_from_customer_stock_count"),
+                it.get("return_to_seller_stock_count"),
+                it.get("waiting_docs_stock_count"),
+                it.get("other_stock_count"),
             ])
-        if len(items) < body["limit"]:
-            break
-        body["offset"] += body["limit"]
     return [headers] + rows
 
 def _ozon_fetch_perf_campaigns(account: dict) -> list:
@@ -2249,25 +2550,52 @@ def _ozon_fetch_perf_statistics(account: dict, start: str, end: str) -> list:
             ])
     return [headers] + rows
 
+# ── Output column filter ──────────────────────────────────────────────────
+def _ozon_filter_columns(raw: list, fields: Optional[list]) -> list:
+    """Keep only requested columns (preserving their order). Empty = keep all.
+    Unknown fields are silently ignored."""
+    if not raw or not fields:
+        return raw
+    headers = raw[0]
+    keep_idx = []
+    new_headers = []
+    seen = set()
+    for f in fields:
+        if f in seen:
+            continue
+        seen.add(f)
+        if f in headers:
+            keep_idx.append(headers.index(f))
+            new_headers.append(f)
+    if not keep_idx:
+        return raw  # nothing recognised → return all
+    out = [new_headers]
+    for r in raw[1:]:
+        out.append([r[i] if i < len(r) else None for i in keep_idx])
+    return out
+
 # ── Dispatcher ─────────────────────────────────────────────────────────────
 def _ozon_fetch_dispatch(account: dict, entity: str,
-                         start: str, end: str) -> list:
-    if entity == "ozon_product":              return _ozon_fetch_product(account)
-    if entity == "ozon_stock":                return _ozon_fetch_stock(account)
-    if entity == "ozon_posting_fbs":          return _ozon_fetch_posting_fbs(account, start, end)
-    if entity == "ozon_posting_fbo":          return _ozon_fetch_posting_fbo(account, start, end)
-    if entity == "ozon_returns_fbs":          return _ozon_fetch_returns_fbs(account)
-    if entity == "ozon_returns_fbo":          return _ozon_fetch_returns_fbo(account)
-    if entity == "ozon_finance_transaction":  return _ozon_fetch_finance_transaction(account, start, end)
-    if entity == "ozon_analytics_data":       return _ozon_fetch_analytics_data(account, start, end)
-    if entity == "ozon_analytics_stocks":     return _ozon_fetch_analytics_stocks(account)
-    if entity == "ozon_perf_campaigns":       return _ozon_fetch_perf_campaigns(account)
-    if entity == "ozon_perf_statistics":      return _ozon_fetch_perf_statistics(account, start, end)
-    raise Exception(f"Неизвестная сущность Ozon: {entity}")
+                         start: str, end: str,
+                         fields: Optional[list] = None) -> list:
+    if entity == "ozon_product":              raw = _ozon_fetch_product(account)
+    elif entity == "ozon_stock":              raw = _ozon_fetch_stock(account)
+    elif entity == "ozon_posting_fbs":        raw = _ozon_fetch_posting_fbs(account, start, end)
+    elif entity == "ozon_posting_fbo":        raw = _ozon_fetch_posting_fbo(account, start, end)
+    elif entity == "ozon_returns_fbs":        raw = _ozon_fetch_returns_fbs(account)
+    elif entity == "ozon_returns_fbo":        raw = _ozon_fetch_returns_fbo(account)
+    elif entity == "ozon_finance_transaction":raw = _ozon_fetch_finance_transaction(account, start, end)
+    elif entity == "ozon_analytics_data":     raw = _ozon_fetch_analytics_data(account, start, end)
+    elif entity == "ozon_analytics_stocks":   raw = _ozon_fetch_analytics_stocks(account)
+    elif entity == "ozon_perf_campaigns":     raw = _ozon_fetch_perf_campaigns(account)
+    elif entity == "ozon_perf_statistics":    raw = _ozon_fetch_perf_statistics(account, start, end)
+    else: raise Exception(f"Неизвестная сущность Ozon: {entity}")
+    return _ozon_filter_columns(raw, fields)
 
 # ── Async event iterator (mirrors Bitrix _export_event_iter) ───────────────
 async def _ozon_export_event_iter(config: dict, account_name: str, entity: str,
-                                  date_field: str, start_date: str, end_date: str):
+                                  date_field: str, start_date: str, end_date: str,
+                                  fields: Optional[list] = None):
     account = _ozon_account_by_name(config, account_name)
     if not account:
         yield {"status": "error", "error": f"Аккаунт Ozon '{account_name}' не найден"}
@@ -2281,11 +2609,14 @@ async def _ozon_export_event_iter(config: dict, account_name: str, entity: str,
                    "message": f"Период: {start_date} → {end_date} (по {date_field})"}
         else:
             yield {"status": "info", "message": "Без фильтра по дате (полная выгрузка)"}
+        if fields:
+            preview = ", ".join(fields[:8]) + ("..." if len(fields) > 8 else "")
+            yield {"status": "info", "message": f"Поля ({len(fields)}): {preview}"}
 
         # Run blocking fetcher in a thread, with periodic heartbeats.
         _task = asyncio.ensure_future(asyncio.to_thread(
             _ozon_fetch_dispatch, account, entity,
-            start_date or "", end_date or ""
+            start_date or "", end_date or "", fields
         ))
         while True:
             try:
@@ -2319,6 +2650,15 @@ async def api_ozon_entities():
 @app.get("/api/ozon/date-field-labels")
 async def api_ozon_date_labels():
     return OZON_DATE_LABELS
+
+@app.get("/api/ozon/entity-fields")
+async def api_ozon_entity_fields(entity: str):
+    """Return available columns for an Ozon entity, with Russian labels."""
+    fields = OZON_ENTITY_FIELDS.get(entity, [])
+    return {
+        "fields": fields,
+        "labels": {f: OZON_FIELD_LABELS.get(f, f) for f in fields},
+    }
 
 @app.get("/api/ozon/accounts")
 async def api_ozon_accounts():
@@ -2440,17 +2780,18 @@ async def api_ozon_export_stream(data: dict):
     date_field   = data.get("date_field", "")
     start_date   = data.get("start_date", "")
     end_date     = data.get("end_date", "")
+    fields       = data.get("fields") or None
 
     async def gen():
         inner = _ozon_export_event_iter(config, account_name, entity,
-                                        date_field, start_date, end_date)
+                                        date_field, start_date, end_date, fields)
         async for ev in _iter_with_history(
             inner,
             source="manual_form", entity=entity, date_field=date_field,
             start_date=start_date, end_date=end_date,
             dimensions_filters=[{"fieldName": "OZON_ACCOUNT", "values": [account_name],
                                  "type": "INCLUDE", "operator": "IN_LIST"}] if account_name else [],
-            fields=[],
+            fields=fields or [],
             provider="ozon",
             config_name=None,
         ):

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 
@@ -42,7 +42,7 @@
     </div>
     <div class="nav-item" data-page="reconcile">
       <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-      Сверка данных
+      Контроль данных
     </div>
     <div class="nav-item" data-page="history">
       <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
@@ -96,41 +96,40 @@
         <label class="form-label">Кабинет Ozon
           <span class="hint" data-tip="Если ещё не подключён — добавьте на вкладке «Подключение»"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM12 6c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg></span>
         </label>
-        <select id="exportOzonAccount" class="form-control">
+        <select id="exportOzonAccount" class="form-control" onchange="updateOzonGating()">
           <option value="">— нет подключённых кабинетов —</option>
         </select>
+        <div id="ozonGatingHint" class="ozon-gate-hint" style="display:none">
+          Сначала выберите кабинет Ozon — тогда станут доступны выгружаемая сущность и кнопка запуска.
+        </div>
       </div>
 
       <div class="saved-configs-panel">
-        <div class="form-group">
-          <label class="form-label">Сохранённые конфигурации</label>
-          <div class="sc-row">
-            <select id="loadConfigSelect" class="form-control">
-              <option value="">— выбрать конфигурацию для загрузки —</option>
-            </select>
-            <button class="btn btn-secondary sc-btn" type="button"
-                    onclick="loadSelectedConfig()">Загрузить</button>
-            <div class="sc-menu-wrap">
-              <button class="btn btn-secondary sc-btn sc-menu-btn" type="button"
-                      onclick="toggleSavedCfgMenu(event)" title="Действия">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5"  r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-              </button>
-              <div class="sc-menu" id="savedCfgMenu">
-                <a onclick="renameSelectedConfig(); closeSavedCfgMenu()">Переименовать</a>
-                <a onclick="overwriteSelectedConfig(); closeSavedCfgMenu()">Перезаписать выбранную</a>
-                <a class="sc-menu-danger" onclick="deleteSelectedConfig(); closeSavedCfgMenu()">Удалить</a>
-              </div>
+        <div class="sc-row">
+          <select id="loadConfigSelect" class="form-control sc-select"
+                  onchange="loadSelectedConfig()">
+            <option value="">— конфигурация —</option>
+          </select>
+          <div class="sc-menu-wrap">
+            <button class="btn btn-secondary sc-btn sc-menu-btn" type="button"
+                    onclick="toggleSavedCfgMenu(event)" title="Действия с конфигурациями">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5"  r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+            </button>
+            <div class="sc-menu" id="savedCfgMenu">
+              <a onclick="openSaveCfgPanel(); closeSavedCfgMenu()">Сохранить как новую…</a>
+              <a onclick="overwriteSelectedConfig(); closeSavedCfgMenu()">Перезаписать выбранную</a>
+              <a onclick="renameSelectedConfig(); closeSavedCfgMenu()">Переименовать</a>
+              <a class="sc-menu-danger" onclick="deleteSelectedConfig(); closeSavedCfgMenu()">Удалить</a>
             </div>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Сохранить текущие настройки как новую конфигурацию</label>
-          <div class="sc-row">
-            <input type="text" id="newConfigName" class="form-control"
-                   placeholder="Название (например: Сделки воронка №1, поля A/B/C)">
-            <button class="btn btn-primary sc-btn" type="button"
-                    onclick="saveCurrentAsConfig()">Сохранить</button>
-          </div>
+        <div id="saveCfgPanel" class="sc-save-panel" style="display:none">
+          <input type="text" id="newConfigName" class="form-control"
+                 placeholder="Название новой конфигурации">
+          <button class="btn btn-primary sc-btn" type="button"
+                  onclick="saveCurrentAsConfig()">Сохранить</button>
+          <button class="btn btn-secondary sc-btn" type="button"
+                  onclick="closeSaveCfgPanel()" title="Отмена">✕</button>
         </div>
         <div id="savedCfgMsg" class="result-msg"></div>
       </div>
@@ -154,6 +153,27 @@
             <input type="date" id="exportEndDate" class="form-control">
           </div>
         </div>
+      </div>
+
+      <!-- Ozon fields section -->
+      <div id="ozonFieldsSection" style="display:none">
+        <div class="filters-header">
+          <span class="filters-title">Поля для выгрузки</span>
+          <span id="ozonFieldsLoading" class="filters-loading" style="display:none">загрузка...</span>
+        </div>
+        <div class="fields-search-row">
+          <input type="text" id="ozonFieldsSearch" class="fields-search-input"
+                 placeholder="Поиск по полям..." oninput="filterOzonFields(this.value)">
+          <span id="ozonFieldsCount" class="fields-count"></span>
+        </div>
+        <label class="form-label">
+          <span>Выбранные поля</span>
+          <span class="sel-btns">
+            <a onclick="checkAllOzonFields(true)">Все</a> /
+            <a onclick="checkAllOzonFields(false)">Снять</a>
+          </span>
+        </label>
+        <div id="ozonFieldsList" class="checkbox-grid"></div>
       </div>
 
       <!-- Filters section -->
@@ -297,11 +317,11 @@
     </div>
   </div>
 
-  <!-- ── Reconciliation page ───────────────────────────────────── -->
+  <!-- ── Data control page (Reconciliation + Deletion) ────────── -->
   <div class="page" id="page-reconcile">
     <div class="page-header">
-      <div class="page-title">Сверка данных</div>
-      <div class="page-subtitle">Проверка изменений в Bitrix24 и обновление ClickHouse (по полю даты изменения)</div>
+      <div class="page-title">Контроль данных</div>
+      <div class="page-subtitle">Сверка изменений и удаление данных из ClickHouse</div>
     </div>
 
     <div class="card">
@@ -310,50 +330,98 @@
         <span>Проверка подключения...</span>
       </div>
 
-      <div class="sched-note">
-        <strong>Как работает:</strong> для каждой выбранной конфигурации выгружаются данные из Bitrix24 за указанный период по полю <em>даты изменения</em> (DATE_MODIFY / CHANGED_DATE), затем сравниваются с тем, что уже есть в ClickHouse по полю <code>ID</code>.<br>
-        Показывается сводка изменений и предложение их применить.<br>
-        ⚠ <strong>Удалённые в Bitrix24 записи не обнаруживаются</strong> — их даты изменения уже не приходят. Удаления нужно обрабатывать отдельно.<br>
-        Сущности без поля <code>ID</code> (истории статусов, связи) пропускаются.
+      <div class="dc-tabs">
+        <button type="button" class="dc-tab active" data-dctab="check"
+                onclick="switchDcTab('check')">Сверка изменений</button>
+        <button type="button" class="dc-tab" data-dctab="delete"
+                onclick="switchDcTab('delete')">Удаление данных</button>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">
-          Сохранённые конфигурации
-          <span class="sel-btns">
-            <a onclick="checkAll('reconcileConfigsList',true)">Все</a> /
-            <a onclick="checkAll('reconcileConfigsList',false)">Снять</a>
-          </span>
-        </label>
-        <div id="reconcileConfigsList" class="checkbox-group manual-configs-list">
-          <div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>
+      <!-- Tab: Reconciliation check -->
+      <div class="dc-pane" id="dc-pane-check">
+        <div class="sched-note">
+          <strong>Как работает:</strong> для каждой выбранной конфигурации выгружаются данные из Bitrix24 за указанный период по полю <em>даты изменения</em> (DATE_MODIFY / CHANGED_DATE), затем сравниваются с тем, что уже есть в ClickHouse по полю <code>ID</code>.<br>
+          Показывается сводка изменений и предложение их применить.<br>
+          ⚠ <strong>Удалённые в Bitrix24 записи не обнаруживаются</strong> — их даты изменения уже не приходят. Удаления нужно обрабатывать на вкладке «Удаление данных».<br>
+          Сущности без поля <code>ID</code> (истории статусов, связи) пропускаются.
         </div>
-      </div>
 
-      <div class="form-group">
-        <label class="form-label">Период по дате изменения</label>
-        <div class="date-row">
-          <input type="date" id="reconcileStartDate" class="form-control">
-          <input type="date" id="reconcileEndDate" class="form-control">
+        <div class="form-group">
+          <label class="form-label">
+            Сохранённые конфигурации
+            <span class="sel-btns">
+              <a onclick="checkAll('reconcileConfigsList',true)">Все</a> /
+              <a onclick="checkAll('reconcileConfigsList',false)">Снять</a>
+            </span>
+          </label>
+          <div id="reconcileConfigsList" class="checkbox-group manual-configs-list">
+            <div class="manual-empty">Нет сохранённых конфигураций. Создайте их на вкладке «Отправка данных».</div>
+          </div>
         </div>
-      </div>
 
-      <div class="btn-row">
-        <button class="btn btn-primary" id="btnReconcileCheck" type="button"
-                onclick="runReconcileCheck()">
-          <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M19 3H5c-1.1 0-1.99.9-1.99 2L3 19c0 1.1.89 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-          Проверить изменения
-        </button>
-      </div>
-
-      <div id="reconcileProgress" class="export-progress" style="display:none">
-        <div class="progress-header">
-          <span id="reconcileStatusLabel">Проверка...</span>
+        <div class="form-group">
+          <label class="form-label">Период по дате изменения</label>
+          <div class="date-row">
+            <input type="date" id="reconcileStartDate" class="form-control">
+            <input type="date" id="reconcileEndDate" class="form-control">
+          </div>
         </div>
-        <div id="reconcileLog" class="progress-log"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnReconcileCheck" type="button"
+                  onclick="runReconcileCheck()">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M19 3H5c-1.1 0-1.99.9-1.99 2L3 19c0 1.1.89 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+            Проверить изменения
+          </button>
+        </div>
+
+        <div id="reconcileProgress" class="export-progress" style="display:none">
+          <div class="progress-header">
+            <span id="reconcileStatusLabel">Проверка...</span>
+          </div>
+          <div id="reconcileLog" class="progress-log"></div>
+        </div>
+
+        <div id="reconcileResults" class="manual-review" style="display:none"></div>
       </div>
 
-      <div id="reconcileResults" class="manual-review" style="display:none"></div>
+      <!-- Tab: Deletion -->
+      <div class="dc-pane" id="dc-pane-delete" style="display:none">
+        <div class="sched-note dc-warn-note">
+          <strong>Внимание:</strong> удаление выполняется через <code>ALTER TABLE … DELETE</code> в ClickHouse и <strong>необратимо</strong>.
+          Удаляются строки указанной таблицы (= сущности), у которых выбранное поле даты попадает в диапазон.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Сущность (таблица в ClickHouse)</label>
+          <select id="delEntity" class="form-control" onchange="onDelEntityChange()">
+            <option value="">— выберите сущность —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Поле даты</label>
+          <select id="delDateField" class="form-control"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Период</label>
+          <div class="date-row">
+            <input type="date" id="delStartDate" class="form-control">
+            <input type="date" id="delEndDate" class="form-control">
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-danger" id="btnDeleteData" type="button"
+                  onclick="runDeleteData()">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            Удалить данные за период
+          </button>
+        </div>
+
+        <div id="delResult" class="result-msg"></div>
+      </div>
     </div>
   </div>
 
@@ -367,6 +435,11 @@
     <div class="card">
       <div class="hist-toolbar">
         <div class="hist-filters">
+          <select id="histProviderFilter" class="form-control hist-filter-control">
+            <option value="">Все провайдеры</option>
+            <option value="bitrix">Bitrix24</option>
+            <option value="ozon">Ozon</option>
+          </select>
           <select id="histSourceFilter" class="form-control hist-filter-control">
             <option value="">Все источники</option>
             <option value="manual_form">Отправка данных</option>
@@ -895,6 +968,19 @@ function closeSavedCfgMenu() {
   const m = document.getElementById('savedCfgMenu');
   if (m) m.classList.remove('open');
 }
+function openSaveCfgPanel() {
+  const p = document.getElementById('saveCfgPanel');
+  if (!p) return;
+  p.style.display = 'flex';
+  const inp = document.getElementById('newConfigName');
+  if (inp) { inp.focus(); inp.select && inp.select(); }
+}
+function closeSaveCfgPanel() {
+  const p = document.getElementById('saveCfgPanel');
+  if (p) p.style.display = 'none';
+  const inp = document.getElementById('newConfigName');
+  if (inp) inp.value = '';
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Entity selects
@@ -935,6 +1021,98 @@ function entityProvider(code) {
   return String(code).startsWith('ozon_') ? 'ozon' : 'bitrix';
 }
 
+// ─── Ozon field selection (Export page) ───────────────────────────
+let _ozonFieldsByEntity = {};   // cache { entity → {fields:[], labels:{}} }
+
+async function loadOzonFieldsForEntity(entity) {
+  const sec = document.getElementById('ozonFieldsSection');
+  const list = document.getElementById('ozonFieldsList');
+  const loading = document.getElementById('ozonFieldsLoading');
+
+  list.innerHTML = '';
+  if (!entity) { sec.style.display = 'none'; return; }
+
+  sec.style.display = 'block';
+  loading.style.display = 'inline';
+
+  let data = _ozonFieldsByEntity[entity];
+  if (!data) {
+    try {
+      data = await fetch(`/api/ozon/entity-fields?entity=${encodeURIComponent(entity)}`).then(r => r.json());
+      _ozonFieldsByEntity[entity] = data;
+    } catch { data = {fields: [], labels: {}}; }
+  }
+
+  if (!data.fields || !data.fields.length) {
+    list.innerHTML = '<div class="manual-empty">Список полей недоступен для этой сущности</div>';
+    loading.style.display = 'none';
+    return;
+  }
+
+  // Restore saved state from localStorage (per entity)
+  const saved = LS.get(`bi_ozon_fields_${entity}`);
+  const savedSet = saved ? new Set(saved) : null; // null = all checked
+
+  data.fields.forEach(f => {
+    const lbl = document.createElement('label');
+    lbl.className = 'checkbox-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = f;
+    cb.checked = savedSet ? savedSet.has(f) : true;
+    cb.addEventListener('change', () => {
+      saveOzonFieldsState(entity);
+      updateOzonFieldsCount();
+    });
+    lbl.appendChild(cb);
+    const ru = data.labels[f] || f;
+    lbl.appendChild(document.createTextNode(' ' + ru + (ru !== f ? ' ' : '')));
+    if (ru !== f) {
+      const small = document.createElement('span');
+      small.style.cssText = 'color:var(--text-3);font-size:10px;font-family:Consolas,monospace';
+      small.textContent = `(${f})`;
+      lbl.appendChild(small);
+    }
+    list.appendChild(lbl);
+  });
+
+  loading.style.display = 'none';
+  updateOzonFieldsCount();
+}
+
+function saveOzonFieldsState(entity) {
+  const all = getAllValues('ozonFieldsList');
+  const chk = getCheckedValues('ozonFieldsList');
+  LS.set(`bi_ozon_fields_${entity}`, all.length === chk.length ? null : chk);
+}
+
+function checkAllOzonFields(state) {
+  document.querySelectorAll('#ozonFieldsList input').forEach(cb => cb.checked = state);
+  const entity = v('exportEntity');
+  if (entity) saveOzonFieldsState(entity);
+  updateOzonFieldsCount();
+}
+
+function filterOzonFields(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('#ozonFieldsList .checkbox-item').forEach(lbl => {
+    lbl.style.display = (!q || lbl.textContent.toLowerCase().includes(q)) ? '' : 'none';
+  });
+}
+
+function updateOzonFieldsCount() {
+  const total = getAllValues('ozonFieldsList').length;
+  const chk   = getCheckedValues('ozonFieldsList').length;
+  const el    = document.getElementById('ozonFieldsCount');
+  if (el) el.textContent = total ? `Выбрано: ${chk} из ${total}` : '';
+}
+
+function collectOzonSelectedFields() {
+  const all = getAllValues('ozonFieldsList');
+  const chk = getCheckedValues('ozonFieldsList');
+  return (all.length && chk.length < all.length) ? chk : [];
+}
+
 function switchProvider(prov) {
   CURRENT_PROVIDER = prov;
   document.querySelectorAll('.prov-btn').forEach(b =>
@@ -949,8 +1127,29 @@ function switchProvider(prov) {
   // Reset filter section visibility (for ozon there are no filters)
   if (prov === 'ozon') {
     document.getElementById('dateSection').style.display = 'none';
+  } else {
+    document.getElementById('ozonFieldsSection').style.display = 'none';
   }
   LS.set('bi_export_provider', prov);
+  updateOzonGating();
+}
+
+function updateOzonGating() {
+  const isOzon  = CURRENT_PROVIDER === 'ozon';
+  const account = (document.getElementById('exportOzonAccount')?.value || '').trim();
+  const blocked = isOzon && !account;
+  const ent     = document.getElementById('exportEntity');
+  const btn     = document.getElementById('btnExport');
+  const hint    = document.getElementById('ozonGatingHint');
+  if (ent) {
+    // Visually muted but still clickable / openable per user request.
+    ent.classList.toggle('is-gated', blocked);
+  }
+  if (btn) {
+    btn.disabled = !!blocked;
+    btn.classList.toggle('is-gated', blocked);
+  }
+  if (hint) hint.style.display = blocked ? '' : 'none';
 }
 
 function refreshOzonAccountSelects() {
@@ -966,6 +1165,7 @@ function refreshOzonAccountSelects() {
     sel.appendChild(opt);
   });
   if (cur && OZON_ACCOUNTS.some(a => a.name === cur)) sel.value = cur;
+  updateOzonGating();
 }
 
 function onEntityChange(prefix) {
@@ -991,9 +1191,11 @@ function onEntityChange(prefix) {
 
   if (prefix === 'export') {
     if (isOzon) {
-      // Ozon: hide Bitrix-only filter section (no funnels/stages/fields discovery)
+      // Ozon: hide Bitrix-only filter section, show Ozon fields selector
       document.getElementById('filtersSection').style.display = 'none';
+      loadOzonFieldsForEntity(code || '');
     } else {
+      document.getElementById('ozonFieldsSection').style.display = 'none';
       loadEntityFilters(code || '');
     }
   }
@@ -1438,6 +1640,8 @@ function runExport() {
     if (!account) { logError('Выберите кабинет Ozon (или добавьте на вкладке «Подключение»)'); return; }
     url  = '/api/ozon/export-stream';
     body = {account, entity, date_field: df, start_date, end_date};
+    const oz_fields = collectOzonSelectedFields();
+    if (oz_fields.length) body.fields = oz_fields;
   } else {
     url  = '/api/export-stream';
     body = {provider: 'bitrix', entity, date_field: df, start_date, end_date};
@@ -1776,7 +1980,7 @@ function buildCurrentConfigPayload() {
       entity,
       date_field:         v('exportDateField') || '',
       dimensions_filters: [],
-      fields:             [],
+      fields:             collectOzonSelectedFields(),
     };
   }
   return {
@@ -1802,6 +2006,7 @@ async function saveCurrentAsConfig() {
     return showMsg('savedCfgMsg', 'err', err.detail || 'Не удалось сохранить');
   }
   document.getElementById('newConfigName').value = '';
+  closeSaveCfgPanel();
   await loadSavedConfigs();
   document.getElementById('loadConfigSelect').value = name;
   showMsg('savedCfgMsg', 'ok', `Конфигурация «${name}» сохранена`);
@@ -1860,7 +2065,7 @@ async function deleteSelectedConfig() {
 
 async function loadSelectedConfig() {
   const name = document.getElementById('loadConfigSelect').value;
-  if (!name) return showMsg('savedCfgMsg', 'err', 'Сначала выберите конфигурацию');
+  if (!name) return;
   const cfg = SAVED_CONFIGS.find(c => c.name === name);
   if (!cfg) return showMsg('savedCfgMsg', 'err', 'Конфигурация не найдена');
   await applyConfigToExportForm(cfg);
@@ -1887,12 +2092,21 @@ async function applyConfigToExportForm(cfg) {
     const ent = findEntity(cfg.entity);
     document.getElementById('dateSection').style.display =
       (ent && ent.date_fields && ent.date_fields.length) ? '' : 'none';
+    // onEntityChange triggers loadOzonFieldsForEntity (which is async)
     onEntityChange('export');
+    await loadOzonFieldsForEntity(cfg.entity);
     if (cfg.date_field) {
       const dfSel = document.getElementById('exportDateField');
       if (dfSel && Array.from(dfSel.options).some(o => o.value === cfg.date_field)) {
         dfSel.value = cfg.date_field;
       }
+    }
+    // Apply saved field selection (empty array = all checked, default)
+    if (cfg.fields && cfg.fields.length) {
+      const set = new Set(cfg.fields);
+      document.querySelectorAll('#ozonFieldsList input').forEach(cb => cb.checked = set.has(cb.value));
+      saveOzonFieldsState(cfg.entity);
+      updateOzonFieldsCount();
     }
     return;
   }
@@ -2364,6 +2578,90 @@ function escapeHtml(s) {
 let reconcileResults = []; // [{config_name, entity, result}]
 let reconcileController = null;
 
+function switchDcTab(tab) {
+  document.querySelectorAll('.dc-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.dctab === tab));
+  document.getElementById('dc-pane-check').style.display  = (tab === 'check')  ? '' : 'none';
+  document.getElementById('dc-pane-delete').style.display = (tab === 'delete') ? '' : 'none';
+  if (tab === 'delete') initDeleteTab();
+}
+
+let DELETE_TAB_INITED = false;
+function initDeleteTab() {
+  if (DELETE_TAB_INITED) return;
+  DELETE_TAB_INITED = true;
+  // Populate entity dropdown with both Bitrix and Ozon entities
+  const sel = document.getElementById('delEntity');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— выберите сущность —</option>';
+  const cats = [
+    {label: 'Bitrix24', cat: ENTITIES},
+    {label: 'Ozon',     cat: OZON_ENTITIES_CAT},
+  ];
+  for (const {label, cat} of cats) {
+    if (!cat) continue;
+    for (const [groupName, items] of Object.entries(cat)) {
+      const grp = document.createElement('optgroup');
+      grp.label = `${label} — ${groupName}`;
+      (items || []).forEach(e => {
+        if (!(e.date_fields && e.date_fields.length)) return;
+        const opt = document.createElement('option');
+        opt.value = e.code;
+        opt.textContent = e.name;
+        grp.appendChild(opt);
+      });
+      if (grp.children.length) sel.appendChild(grp);
+    }
+  }
+}
+
+function onDelEntityChange() {
+  const code = v('delEntity');
+  const df   = document.getElementById('delDateField');
+  df.innerHTML = '';
+  const ent = code ? findEntity(code) : null;
+  if (!ent || !ent.date_fields || !ent.date_fields.length) return;
+  ent.date_fields.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f;
+    opt.textContent = DATE_LABELS[f] || f;
+    df.appendChild(opt);
+  });
+}
+
+async function runDeleteData() {
+  const entity     = v('delEntity');
+  const date_field = v('delDateField');
+  const start_date = v('delStartDate');
+  const end_date   = v('delEndDate');
+  if (!entity)     return showMsg('delResult', 'err', 'Выберите сущность');
+  if (!date_field) return showMsg('delResult', 'err', 'Выберите поле даты');
+  if (!start_date || !end_date) return showMsg('delResult', 'err', 'Укажите период');
+  if (!confirm(`Удалить из ClickHouse все записи таблицы «${entity}» за период ${start_date} — ${end_date} по полю ${date_field}?\n\nДействие необратимо.`)) return;
+
+  const btn = document.getElementById('btnDeleteData');
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Удаляю...';
+  try {
+    const resp = await fetch('/api/delete-data', {
+      method: 'POST', headers: json_h(),
+      body: JSON.stringify({entity, date_field, start_date, end_date}),
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      showMsg('delResult', 'err', j.detail || 'Не удалось удалить');
+    } else {
+      showMsg('delResult', 'ok', `Удалено строк: ${j.deleted_rows}`);
+    }
+  } catch (e) {
+    showMsg('delResult', 'err', 'Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
 async function runReconcileCheck() {
   const configs = getCheckedValues('reconcileConfigsList');
   if (!configs.length) {
@@ -2697,12 +2995,18 @@ async function clearHistory() {
   renderHistory();
 }
 
-function renderHistory() {
+const HISTORY_PAGE_SIZE = 30;
+let HISTORY_VISIBLE = HISTORY_PAGE_SIZE;
+
+function renderHistory(resetVisible = true) {
+  if (resetVisible) HISTORY_VISIBLE = HISTORY_PAGE_SIZE;
+  const provF = v('histProviderFilter');
   const srcF = v('histSourceFilter');
   const stF  = v('histStatusFilter');
   const q    = (document.getElementById('histSearch').value || '').toLowerCase().trim();
 
   let items = HISTORY_ITEMS;
+  if (provF) items = items.filter(i => (i.provider || 'bitrix') === provF);
   if (srcF) items = items.filter(i => i.source === srcF);
   if (stF)  items = items.filter(i => i.status === stF);
   if (q) {
@@ -2712,12 +3016,12 @@ function renderHistory() {
     });
   }
 
-  // Stats
+  // Stats over the full filtered set (not just visible page)
   const okCount  = items.filter(i => i.status === 'ok').length;
   const errCount = items.filter(i => i.status === 'error').length;
   const totalRows = items.reduce((s, i) => s + (i.rows || 0), 0);
   document.getElementById('histStats').innerHTML = items.length
-    ? `Показано: <b>${items.length}</b> | ✅ ${okCount} | ❌ ${errCount} | строк суммарно: <b>${num(totalRows)}</b>`
+    ? `Найдено: <b>${items.length}</b> | ✅ ${okCount} | ❌ ${errCount} | строк суммарно: <b>${num(totalRows)}</b>`
     : '';
 
   const list = document.getElementById('histList');
@@ -2726,8 +3030,23 @@ function renderHistory() {
     return;
   }
 
+  const visible = items.slice(0, HISTORY_VISIBLE);
   list.innerHTML = '';
-  items.forEach(it => list.appendChild(renderHistoryRow(it)));
+  visible.forEach(it => list.appendChild(renderHistoryRow(it)));
+
+  if (items.length > visible.length) {
+    const more = document.createElement('div');
+    more.className = 'hist-more-row';
+    const remaining = items.length - visible.length;
+    const next = Math.min(HISTORY_PAGE_SIZE, remaining);
+    more.innerHTML = `<button class="btn btn-secondary" type="button" onclick="showMoreHistory()">Показать ещё ${next} (осталось ${remaining})</button>`;
+    list.appendChild(more);
+  }
+}
+
+function showMoreHistory() {
+  HISTORY_VISIBLE += HISTORY_PAGE_SIZE;
+  renderHistory(false);
 }
 
 function renderHistoryRow(it) {
@@ -2835,7 +3154,52 @@ function renderHistoryDetails(it) {
     </div>`);
   }
 
+  // Per-entry actions
+  const canDeleteData = !!(it.entity && it.date_field && it.start_date && it.end_date)
+                        && it.source !== 'reconciliation';
+  const dataBtn = canDeleteData
+    ? `<button class="btn btn-danger" type="button"
+              onclick="event.stopPropagation(); deleteHistoryEntry(${it.id}, true)">
+         Удалить запись и данные из ClickHouse
+       </button>`
+    : '';
+  parts.push(`<div class="hist-actions-row">
+    <button class="btn btn-secondary" type="button"
+            onclick="event.stopPropagation(); deleteHistoryEntry(${it.id}, false)">
+      Удалить запись из истории
+    </button>
+    ${dataBtn}
+    <span class="hist-action-msg" id="histActionMsg_${it.id}"></span>
+  </div>`);
+
   return parts.join('');
+}
+
+async function deleteHistoryEntry(id, alsoData) {
+  const msgEl = document.getElementById('histActionMsg_' + id);
+  const ask = alsoData
+    ? 'Удалить запись истории И соответствующие строки из ClickHouse за этот период?\n\nДействие необратимо.'
+    : 'Удалить эту запись из истории?';
+  if (!confirm(ask)) return;
+  if (msgEl) { msgEl.textContent = 'Удаление...'; msgEl.style.color = ''; }
+  try {
+    const url = `/api/history/${id}` + (alsoData ? '?also_data=true' : '');
+    const resp = await fetch(url, { method: 'DELETE' });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (msgEl) { msgEl.textContent = j.detail || 'Не удалось удалить'; msgEl.style.color = 'var(--err)'; }
+      return;
+    }
+    if (alsoData) {
+      const note = j.warning ? ` (${j.warning})` : '';
+      if (msgEl) { msgEl.textContent = `Удалено строк: ${j.deleted_rows}${note}`; msgEl.style.color = 'var(--ok)'; }
+    }
+    // Remove from in-memory list and re-render
+    HISTORY_ITEMS = HISTORY_ITEMS.filter(it => it.id !== id);
+    setTimeout(() => renderHistory(false), alsoData ? 800 : 0);
+  } catch (e) {
+    if (msgEl) { msgEl.textContent = 'Ошибка: ' + e.message; msgEl.style.color = 'var(--err)'; }
+  }
 }
 
 function formatHistDate(iso) {
@@ -2860,11 +3224,11 @@ function formatDuration(sec) {
 
 // Wire filters
 document.addEventListener('DOMContentLoaded', () => {
-  ['histSourceFilter', 'histStatusFilter', 'histSearch'].forEach(id => {
+  ['histProviderFilter', 'histSourceFilter', 'histStatusFilter', 'histSearch'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener('input',  renderHistory);
-    el.addEventListener('change', renderHistory);
+    el.addEventListener('input',  () => renderHistory(true));
+    el.addEventListener('change', () => renderHistory(true));
   });
 });
 
