@@ -393,6 +393,21 @@ def _table_col_types(client, table_name: str) -> dict:
     except Exception:
         return {}
 
+# Сущности, у которых API не поддерживает фильтр по датам и мы тянем
+# полный снимок. Чтобы не плодить дубли при повторных выгрузках —
+# перед INSERT удаляем строки по id из текущей выборки (upsert).
+_SNAPSHOT_DEDUPE_BY: dict = {
+    "ozon_returns_fbs": "id",
+    "ozon_returns_fbo": "id",
+    "ozon_product":     "product_id",
+}
+
+# Принудительные типы колонок для отдельных сущностей.
+# Если таблица уже создана с другим типом — выполним ALTER MODIFY COLUMN.
+_COLUMN_TYPE_OVERRIDES: dict = {
+    "ozon_perf_statistics": {"date": "Nullable(Date)"},
+}
+
 def push_to_clickhouse(config: dict, table_name: str, raw: list) -> int:
     if len(raw) < 2:
         return 0
@@ -428,6 +443,19 @@ def push_to_clickhouse(config: dict, table_name: str, raw: list) -> int:
             except Exception as alter_exc:
                 logger.warning("Failed to ALTER %s ADD %s: %s", safe, h, alter_exc)
 
+    # Принудительные типы по сущности — апдейтим существующие колонки,
+    # если в таблице сохранился неправильный тип с прошлых выгрузок.
+    overrides = _COLUMN_TYPE_OVERRIDES.get(table_name) or {}
+    for col, desired in overrides.items():
+        cur = existing.get(col)
+        if cur and cur != desired:
+            try:
+                client.command(f"ALTER TABLE `{safe}` MODIFY COLUMN `{col}` {desired}")
+                existing[col] = desired
+                logger.info("Modified column %s on %s: %s -> %s", col, safe, cur, desired)
+            except Exception as alter_exc:
+                logger.warning("Failed to ALTER %s MODIFY %s: %s", safe, col, alter_exc)
+
     # Use the actual table schema (not freshly inferred) so type conversions
     # stay consistent across days when column values change character (e.g.
     # CRM_PRODUCT_ID going from single int → comma-separated string).
@@ -437,6 +465,24 @@ def push_to_clickhouse(config: dict, table_name: str, raw: list) -> int:
     for r in rows:
         padded = list(r) + [None] * (len(headers) - len(r))
         converted.append([_convert(v, t) for v, t in zip(padded, col_types)])
+
+    # Upsert для snapshot-сущностей: DELETE по id-колонке, потом INSERT.
+    dedupe_col = _SNAPSHOT_DEDUPE_BY.get(table_name)
+    if dedupe_col and dedupe_col in headers:
+        idx = headers.index(dedupe_col)
+        ids = [r[idx] for r in converted if r[idx] is not None and r[idx] != ""]
+        if ids:
+            # квотируем как строки — универсально для Int/String id
+            id_list = ",".join("'" + str(v).replace("'", "''") + "'" for v in ids)
+            try:
+                client.command(
+                    f"ALTER TABLE `{safe}` DELETE "
+                    f"WHERE toString(`{dedupe_col}`) IN ({id_list}) "
+                    f"SETTINGS mutations_sync = 2"
+                )
+                logger.info("Dedup %s: deleted by %s (%d ids)", safe, dedupe_col, len(ids))
+            except Exception as del_exc:
+                logger.warning("Dedup DELETE failed on %s: %s", safe, del_exc)
 
     client.insert(safe, converted, column_names=list(headers))
     return len(rows)
@@ -1928,13 +1974,13 @@ OZON_ENTITY_FIELDS: dict = {
     ],
     "ozon_returns_fbs": [
         "id", "posting_number", "order_id", "sku", "offer_id", "name",
-        "quantity", "price", "status_name", "return_reason_name",
-        "accepted_from_customer_moment", "returned_to_ozon_moment",
+        "quantity", "price", "currency_code", "status_name", "return_reason_name",
+        "schema", "place_name", "moved_to_place_moment", "returned_to_ozon_moment",
     ],
     "ozon_returns_fbo": [
         "id", "posting_number", "order_id", "sku", "offer_id", "name",
-        "quantity", "price", "status_name", "return_reason_name",
-        "accepted_from_customer_moment", "returned_to_ozon_moment",
+        "quantity", "price", "currency_code", "status_name", "return_reason_name",
+        "schema", "place_name", "moved_to_place_moment", "returned_to_ozon_moment",
     ],
     "ozon_finance_transaction": [
         "operation_id", "operation_type", "operation_type_name", "operation_date",
@@ -2366,43 +2412,69 @@ def _ozon_fetch_returns_fbo(account: dict) -> list:
 
 def _ozon_fetch_returns(account: dict, fbo: bool) -> list:
     headers = ["id", "posting_number", "order_id", "sku", "offer_id", "name",
-               "quantity", "price", "status_name", "return_reason_name",
-               "accepted_from_customer_moment", "returned_to_ozon_moment"]
+               "quantity", "price", "currency_code", "status_name", "return_reason_name",
+               "schema", "place_name", "moved_to_place_moment", "returned_to_ozon_moment"]
     rows: list = []
-    path = "/v1/returns/company/fbo" if fbo else "/v1/returns/company/fbs"
-    offset = 0
-    limit  = 1000
+    scheme = "FBO" if fbo else "FBS"
+    last_id = 0
+    limit  = 500
     while True:
-        body = {"filter": {}, "limit": limit, "offset": offset}
-        data = _ozon_seller_request(account, "POST", path, body=body)
-        items = data.get("returns") or data.get("result") or []
-        if isinstance(items, dict):
-            items = items.get("returns") or []
+        body = {
+            "filter": {"logistic_scheme": scheme},
+            "limit": limit,
+            "last_id": last_id,
+        }
+        data = _ozon_seller_request(account, "POST", "/v1/returns/list", body=body)
+        items = data.get("returns") or []
         if not items:
             break
         for r in items:
-            reason = r.get("return_reason") or {}
+            product = r.get("product") or {}
+            price_obj = product.get("price") or {}
+            if isinstance(price_obj, dict):
+                price_val = price_obj.get("price") or price_obj.get("amount") or ""
+                currency  = price_obj.get("currency_code") or ""
+            else:
+                price_val = price_obj
+                currency  = ""
+            visual = r.get("visual") or {}
+            status = visual.get("status") if isinstance(visual, dict) else {}
+            status_name = ""
+            if isinstance(status, dict):
+                status_name = status.get("display_name") or status.get("sys_name") or ""
+            place = r.get("place") or {}
+            place_name = place.get("name") if isinstance(place, dict) else ""
+            logistic = r.get("logistic") or {}
+            moved_moment = ""
+            if isinstance(logistic, dict):
+                moved = logistic.get("technical_return_moment") or {}
+                if isinstance(moved, dict):
+                    moved_moment = moved.get("moment") or ""
             rows.append([
                 r.get("id"), r.get("posting_number"), r.get("order_id"),
-                r.get("sku"), r.get("offer_id"), r.get("name"),
-                r.get("quantity"), r.get("price"),
-                (r.get("status_name") or (r.get("status") or {}).get("status_name", "")),
-                reason.get("name") if isinstance(reason, dict) else "",
-                r.get("accepted_from_customer_moment"),
-                r.get("returned_to_ozon_moment"),
+                product.get("sku"), product.get("offer_id"), product.get("name"),
+                product.get("quantity"), price_val, currency,
+                status_name,
+                r.get("return_reason_name") or "",
+                r.get("schema") or scheme,
+                place_name,
+                moved_moment,
+                r.get("returned_to_ozon_moment") or "",
             ])
+            rid = r.get("id")
+            if isinstance(rid, int) and rid > last_id:
+                last_id = rid
+        if not data.get("has_next"):
+            break
         if len(items) < limit:
             break
-        offset += limit
     return [headers] + rows
 
 OZON_ANALYTICS_DEFAULT_METRICS = [
-    "revenue", "ordered_units", "returns",
-    "hits_view_search", "hits_view_pdp", "hits_view",
-    "hits_tocart_search", "hits_tocart_pdp", "hits_tocart",
-    "session_view_search", "session_view_pdp", "session_view",
-    "conv_tocart_search", "conv_tocart_pdp", "conv_tocart",
-    "delivered_units", "cancellations",
+    "revenue", "ordered_units", "returns", "delivered_units", "cancellations",
+    "hits_view", "hits_view_search", "hits_view_pdp",
+    "hits_tocart", "hits_tocart_search", "hits_tocart_pdp",
+    "session_view", "session_view_search", "conv_tocart",
 ]
 
 # Now that metrics list exists, fill the analytics_data fields entry
@@ -2517,37 +2589,194 @@ def _ozon_fetch_perf_campaigns(account: dict) -> list:
     return [headers] + rows
 
 def _ozon_fetch_perf_statistics(account: dict, start: str, end: str) -> list:
-    """Daily statistics by campaign. Aggregates into one BI-style table."""
+    """Daily statistics by campaign.
+
+    Ozon Performance API — асинхронный flow:
+      1) POST /api/client/statistics   -> {UUID}
+      2) GET  /api/client/statistics/{UUID}   (polling до state=OK/ERROR)
+      3) GET  /api/client/statistics/report?UUID=...   (CSV/JSON отчёт)
+    """
     headers = ["date", "campaign_id", "campaign_title", "views", "clicks",
                "moneySpent", "ordersMoney", "orders"]
     rows: list = []
-    # 1. fetch campaign list
+
     camp_data = _ozon_perf_request(account, "GET", "/api/client/campaign")
     camps = camp_data.get("list") or []
     if not camps:
         return [headers]
     title_by_id = {str(c.get("id")): c.get("title", "") for c in camps}
-    # 2. for each campaign — daily stats
-    for c in camps:
-        cid = str(c.get("id"))
+    cids_all = [str(c.get("id")) for c in camps]
+
+    # Performance API ждёт RFC3339 timestamp, не просто YYYY-MM-DD.
+    def _to_ts(d: str, end_of_day: bool) -> str:
+        if not d:
+            return d
+        if "T" in d:
+            return d
+        return f"{d}T23:59:59Z" if end_of_day else f"{d}T00:00:00Z"
+
+    start_ts = _to_ts(start, end_of_day=False)
+    end_ts   = _to_ts(end,   end_of_day=True)
+
+    import time as _time
+    CHUNK = 10  # Ozon: максимум 10 кампаний за один запрос отчёта
+
+    # Собираем сырой текст отчётов со всех чанков, потом парсим единым проходом.
+    chunk_payloads: list = []  # [(content_type, text), ...]
+
+    for chunk_start in range(0, len(cids_all), CHUNK):
+        cids = cids_all[chunk_start:chunk_start + CHUNK]
         body = {
-            "campaigns": [cid],
-            "from":      start,
-            "to":        end,
+            "campaigns": cids,
+            "from":      start_ts,
+            "to":        end_ts,
             "groupBy":   "DATE",
         }
-        try:
-            data = _ozon_perf_request(account, "POST", "/api/client/statistics/json",
-                                      body=body)
-        except Exception:
+        # Ozon разрешает только один активный отчёт. При 429 ждём и повторяем.
+        submit = None
+        for retry in range(20):
+            try:
+                submit = _ozon_perf_request(account, "POST", "/api/client/statistics/json", body=body)
+                break
+            except Exception as exc:
+                msg = str(exc)
+                if "429" in msg:
+                    _time.sleep(10)
+                    continue
+                logger.warning("perf statistics submit failed (chunk %d): %s", chunk_start, exc)
+                submit = None
+                break
+        if not submit:
             continue
-        # Response shape varies; try multiple known layouts
-        for entry in (data.get("rows") or []):
-            rows.append([
-                entry.get("date"), cid, title_by_id.get(cid, ""),
-                entry.get("views"), entry.get("clicks"),
-                entry.get("moneySpent"), entry.get("ordersMoney"), entry.get("orders"),
-            ])
+        uuid = submit.get("UUID") or submit.get("uuid")
+        if not uuid:
+            logger.warning("perf statistics: no UUID in response: %s", str(submit)[:200])
+            continue
+
+        # Поллим. 404 во время ожидания — это "ещё не готов", не выход.
+        state = ""
+        for _ in range(120):  # до ~10 минут на чанк
+            _time.sleep(5)
+            try:
+                status = _ozon_perf_request(account, "GET", f"/api/client/statistics/{uuid}")
+            except Exception as exc:
+                if "404" in str(exc):
+                    continue
+                continue
+            state = (status.get("state") or status.get("status") or "").upper()
+            if state in ("OK", "DONE", "READY", "SUCCESS"):
+                break
+            if state in ("ERROR", "CANCELLED", "FAILED"):
+                logger.warning("perf statistics report %s: state=%s", uuid, state)
+                state = ""
+                break
+        if state not in ("OK", "DONE", "READY", "SUCCESS"):
+            logger.warning("perf statistics report %s timed out (chunk %d)", uuid, chunk_start)
+            continue
+
+        token = _ozon_perf_token(account)
+        try:
+            resp = requests.get(
+                f"{OZON_PERF_BASE}/api/client/statistics/report",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"UUID": uuid},
+                timeout=180,
+            )
+        except Exception as exc:
+            logger.warning("perf statistics report download failed: %s", exc)
+            continue
+        if resp.status_code >= 400:
+            logger.warning("perf statistics report HTTP %d: %s", resp.status_code, resp.text[:200])
+            continue
+        chunk_payloads.append(((resp.headers.get("Content-Type") or "").lower(),
+                               resp.text or ""))
+
+    if not chunk_payloads:
+        return [headers]
+
+    def _num(v):
+        if v in (None, ""):
+            return None
+        try:
+            return float(str(v).replace(",", ".").replace(" ", ""))
+        except Exception:
+            return v
+
+    import json as _json
+
+    def _pick(d: dict, *keys):
+        for k in keys:
+            if isinstance(d, dict) and d.get(k) not in (None, ""):
+                return d.get(k)
+        return None
+
+    def _norm_date(v):
+        # Ozon Performance отдаёт даты в формате DD.MM.YYYY. Приводим к ISO.
+        if not v:
+            return v
+        s = str(v).strip()
+        m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", s)
+        if m:
+            return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+        return s
+
+    for ci, (ctype, text) in enumerate(chunk_payloads):
+        stripped = (text or "").lstrip()
+        if not stripped:
+            logger.warning("perf statistics chunk %d: empty body (ctype=%s)", ci, ctype)
+            continue
+        try:
+            data = _json.loads(stripped)
+        except Exception as exc:
+            logger.warning("perf statistics: JSON parse failed (ctype=%s): %s; head=%r",
+                           ctype, exc, stripped[:200])
+            continue
+
+        # Реальный формат Ozon: top-level dict, где ключ = campaign_id,
+        # значение = {"title", "report": {"rows": [...], "totals": {...}}}.
+        # Также подстраховываемся под устаревшие варианты ниже.
+        items = []
+        if isinstance(data, dict):
+            # cначала пробуем "campaign_id -> obj" формат
+            for k, v in data.items():
+                if isinstance(v, dict) and ("report" in v or "rows" in v or "totals" in v):
+                    items.append((str(k), v))
+            # fallback: старые варианты
+            if not items:
+                for camp in (data.get("campaigns") or data.get("result") or []):
+                    cid = str(camp.get("id") or camp.get("campaignId") or camp.get("campaign_id") or "")
+                    items.append((cid, camp))
+
+        for cid, camp in items:
+            title = title_by_id.get(cid, camp.get("title", ""))
+            report = camp.get("report") if isinstance(camp.get("report"), dict) else {}
+            entries = (report.get("rows") if isinstance(report, dict) else None) \
+                   or camp.get("rows") or []
+            for entry in entries:
+                date_v = _norm_date(_pick(entry, "date", "day", "Date", "period", "dt",
+                                          "dateFrom", "date_from", "Day"))
+                rows.append([
+                    date_v,
+                    cid, title,
+                    _num(_pick(entry, "views", "showsCount", "shows")),
+                    _num(_pick(entry, "clicks", "clicksCount")),
+                    _num(_pick(entry, "moneySpent", "money_spent", "spent")),
+                    _num(_pick(entry, "ordersMoney", "orders_money", "revenue")),
+                    _num(_pick(entry, "orders", "ordersCount")),
+                ])
+            # Если построчных нет — кладём totals как единственную строку с датой == start.
+            # Так хотя бы видно бюджет/показы/клики по кампании за период.
+            if not entries:
+                totals = report.get("totals") if isinstance(report, dict) else None
+                if isinstance(totals, dict) and any(totals.values()):
+                    rows.append([
+                        start, cid, title,
+                        _num(_pick(totals, "views", "shows", "showsCount")),
+                        _num(_pick(totals, "clicks", "clicksCount")),
+                        _num(_pick(totals, "moneySpent", "money_spent", "spent")),
+                        _num(_pick(totals, "ordersMoney", "orders_money", "revenue")),
+                        _num(_pick(totals, "orders", "ordersCount")),
+                    ])
     return [headers] + rows
 
 # ── Output column filter ──────────────────────────────────────────────────
